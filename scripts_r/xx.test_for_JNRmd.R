@@ -330,17 +330,6 @@ ggplot(lamba.dist.long,
        aes(x=dist, y=S, col=name))+
   geom_point()
 
-ggplot(lamba.dist.long, aes(x=totNMF, y=S, color=year))+
-  geom_point()+
-  facet_wrap(vars(name), scales="free")
-
-ggplot(lamba.dist.long, aes(x=year, y=S, color=totNMF, color=year))+
-  geom_point()+
-  facet_wrap(vars(name))
-
-ggplot(lamba.dist.long, aes(x=year, y=totNMF, color=S, color=year))+
-  geom_point()+
-  facet_wrap(vars(name), scales="free")
 
 ggplot(lamba.dist.long, aes(x=year, y=S, color=totNMF, group=herd))+
   geom_point()+
