@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+data/spatial
+data/other
+jags/output
+jags/old
+other
+scripts_r/other

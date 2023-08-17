@@ -1,0 +1,198 @@
+model{
+
+###R survey timing or count type not in here yet
+
+#  Overall informative intercepts for survival and recreuitment
+	meanS <- logit(0.85)
+	muS ~ dnorm(meanS, 100)
+	meanR <- logit(0.15)
+	muR ~ dnorm(meanR, 100)
+	
+
+
+# Offset for survey timing - recruitment
+	offset ~ dnorm(0, 0.1) 
+	
+# Count type offsets
+beta.type.otc.r ~ dnorm(0, 0.1) 
+beta.type.osc.r ~ dnorm(0, 0.1)
+beta.type.mnka.r ~ dnorm(0, 0.1)
+	
+# LP priors
+##uninformative
+	#beta.dist.s  ~ dunif(-10,10)
+	#beta.clim1.s ~ dunif(-10,10)
+	#beta.clim2.s ~ dunif(-10,10)
+
+	#beta.dist.r ~ dunif(-10,10)
+  #beta.clim1.r ~ dunif(-10,10)
+  #beta.clim2.r ~ dunif(-10,10)
+  
+##informative
+  beta.dist.s  ~ dnorm(prior.dist.s.mean, prior.dist.s.tau)
+	beta.clim1.s ~ dnorm(prior.clim1.s.mean, prior.clim1.s.tau)
+	beta.clim2.s ~ dnorm(prior.clim2.s.mean, prior.clim2.s.tau)
+
+  beta.dist.r  ~ dnorm(prior.dist.r.mean, prior.dist.r.tau)
+	beta.clim1.r ~ dnorm(prior.clim1.r.mean, prior.clim1.r.tau)
+	beta.clim2.r ~ dnorm(prior.clim2.r.mean, prior.clim2.r.tau)
+
+	
+# Linear predictors for survival and recruitment
+	for(h in 1:nherd){
+		for(yr in 1:nyr){
+			
+			logit(s.daily[h,yr]) <- muS + # intercept (baseline survival)
+				beta.dist.s*dist[h,yr]+
+								beta.clim1.s*clim1[h,yr] + 
+												beta.clim2.s*clim2[h,yr]
+				
+			logit(R[h,yr]) <- muR + # intercept (baseline recruitment) 
+				offset*month_offset[h,yr]  +
+				beta.dist.r*dist[h,yr]+
+								beta.clim1.r*clim1[h,yr] + 
+												beta.clim2.r*clim2[h,yr]+
+												    beta.type.otc.r*count.otc[h,yr] + 
+												        beta.type.osc.r*count.osc[h,yr] + 
+												            beta.type.mnka.r*count.mnka[h,yr]
+			}
+			}
+
+
+# s.daily to annual survival
+	for(h in 1:nherd){
+		for(yr in 1:nyr){
+		S[h,yr] <- pow(s.daily[h,yr], 365)
+		}}
+
+# Random effect for year-SG
+	for(sg in 1:nsight_grp){	
+		sight_tau_yr_sg[sg] <- 1/(sight_sd_yr_sg[sg]^2)
+		sight_sd_yr_sg[sg] ~ dunif(0, 10)
+		for(yr in 1:nyr){
+			sight_yr_sg[yr, sg] ~ dnorm(0, sight_tau_yr_sg[sg]) 
+			}
+		}
+	
+# Sightability
+	for(sg in 1:nsight_grp){	
+		p_logit[sg] ~ dnorm(mean_grp_p[sg], mean_grp_ptau[sg])T(0, 1) # 0 - 1
+		p_mu[sg] <- logit(p_logit[sg]) # -Inf - Inf
+	}
+		
+# Linear predictor for sightability
+	#  p is only used in observation model for surveys that *do not* have their own
+	#   sightability estimate
+	for(h in 1:nherd){	
+		for(yr in first[h]:nyr){
+			logit(p[h, yr]) <- p_mu[sight_grp[h]] + sight_yr_sg[yr,sight_grp[h]]
+		}
+	}
+
+# Sex ratio
+	for(h in 1:nherd){	
+		for(yr in first[h]:nyr){
+			sexratio[h,yr] ~ dnorm(meansr[1,1], meansr[1,2])T(0,1)
+			}
+		}
+		
+		
+# First year population size
+	for(h in 1:nherd){	
+
+		N[h,first[h],1] ~ dpois(n1[h,1])
+		N[h,first[h],2] ~ dpois(n1[h,2])
+		
+		totCalves[h,first[h]] <- N[h,first[h],1] 
+		totAdults[h,first[h]] <- N[h,first[h],2] 
+		totN[h,first[h]] <- totCalves[h,first[h]] + totAdults[h,first[h]]
+
+		#  Apply sex ratio to get full population size
+		totAdultsMF[h,first[h]] <- totAdults[h,first[h]]/sexratio[h,first[h]]
+		totCalvesMF[h,first[h]] <- totCalves[h,first[h]]/0.5
+		totNMF[h,first[h]] <- totAdultsMF[h,first[h]] + totCalvesMF[h,first[h]] 
+
+		lambda[h,first[h]] <- 1
+		#R.ad[h,first[h]] <- 0.1
+		R_adj[h,first[h]] <- 0.1
+		
+		adj_totNMF[h,first[h]] <- totNMF[h,first[h]]
+		}
+		
+
+	##########################################################################
+#  Process model - multiple herds, 2 ages
+
+	for(h in 1:nherd){	
+		for(yr in (first[h]+1):nyr){
+				
+			# Calves: Poisson, dpois(lambda) where lambda >= 0
+			N[h,yr,1] ~ dpois((totAdultsMF[h,yr] * R[h,yr]) * 0.5)
+
+			#  SubAdults and Adults: Binomial, dbin(p,n), 0 < p < 1 and n ≥ 1
+			N[h,yr,2] ~ dbin(S[h,yr-1], (N[h,yr-1,2] + N[h,yr-1,1]))
+
+			#  Totals in each year - females only
+			totCalves[h,yr] <- N[h,yr,1] 
+			totAdults[h,yr] <- N[h,yr,2] 
+			totN[h,yr] <- totCalves[h,yr] + totAdults[h,yr]
+
+			#  Apply sex ratio to get full population size
+			totAdultsMF[h,yr] <- totAdults[h,yr]/sexratio[h,yr]
+			totCalvesMF[h,yr] <- totCalves[h,yr]/0.5
+			totNMF[h,yr] <- totAdultsMF[h,yr] + totCalvesMF[h,yr]
+
+		
+		# Derived parameters
+		# adult R
+		#R.ad[h,yr] <- N[h,yr,1] /(N[h,yr-1,2] * S[h,yr-1])
+		logit(R_adj[h,yr]) <- logit(R[h,yr]) - offset*month_offset[h,yr]
+		
+		# Adjust totNMF for very small population 
+		adj_totNMF[h,yr] <- ifelse(totNMF[h,yr]<1, 0, totNMF[h,yr])
+	
+		# Lambda
+		lambda[h,yr] <- (adj_totNMF[h,yr] + 0.001)/abs(adj_totNMF[h,yr-1] + 0.001)
+		logla[h,yr] <- log(ifelse(lambda[h,yr] < 0.0001, 0.01, lambda[h,yr]))
+	
+		}
+	}
+		
+		
+	##########################################################################
+	#  Observation Models
+	#  Indexing/columns of data inputs:
+	#  Herd, Year, Age, Sex, Mean, Tau (we only have Sex 1)
+
+	#  Survey observations -- counts indicate survey counts that **have** a sightability value
+	for(i in 1:nc) {
+	  sight_est[i] ~ dnorm(pdat[i,5], pdat[i,6])T(0,1)
+	  cdat[i,5] ~ dbin(sight_est[i], round(totNMF[cdat[i,1], cdat[i,2]]))
+	}
+	
+	# Estimate observations (herd-years that don't have sightability)
+	for(i in 1:ne){
+    edat[i,5] ~ dbin(p[edat[i,1], edat[i,2]], round(totNMF[edat[i,1], edat[i,2]]))
+	}
+
+	#  Survival Observations 
+	# sdat contains event==deaths, and trials=days monitored, so outcome is daily mortality (I.e. 1-daily survival)
+	for(i in 1:ns){
+		sdat[i,3] ~ dbin((1-s.daily[sdat[i,1], sdat[i,2]]), sdat[i,4])
+		#s.daily[h,yr]
+	}
+
+	#  Recruitment Observations
+	for(i in 1:nr){
+		rdat[i,3] ~ dbin(R[rdat[i,1], rdat[i,2]], rdat[i,4])
+		#R[h,yr]
+	}
+		
+	# Sex ratio
+	for(i in 1:nsr){
+		srdat[i,3] ~ dnorm(sexratio[srdat[i,1], srdat[i,2]], srdat[i,4])T(0,1)
+		#sexratio[h,yr]
+	}
+	
+
+}   

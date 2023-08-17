@@ -1,0 +1,858 @@
+---
+title: "BC AB Caribou IPM Climate-Disturbance run"
+author: "Clayton T. Lamb"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: github_document
+---
+
+
+```{r render,include=FALSE, eval=FALSE}
+rmarkdown::render(here::here("jags", 'run_IPM.Rmd'),
+                  output_file =  "README.md")
+
+knitr::purl(input=here::here("jags", '3.run_IPM.Rmd'),
+                  output =  here::here("scripts_r", '3.run_IPM.r'))
+```
+
+
+## Load Data
+```{r Load packages and data, results='hide', message=FALSE, warning=FALSE}
+library(tidybayes)
+library(ggmcmc)
+library(hrbrthemes)
+library(tidylog)
+library(tidyverse)
+
+# Load data ---------------------------------------------------------------
+hd <- read.csv(here::here("data/clean/blueprint.csv"))
+hn <- hd %>%
+	dplyr::select(herd, herd_num)
+
+##demographic data
+cdat <- read_csv(here::here("data/clean/forIPM/cdat.csv"))
+edat <- read_csv(here::here("data/clean/forIPM/edat.csv"))
+sdat <- read_csv(here::here("data/clean/forIPM/surv.yr.ipm.csv"))
+rdat <- read_csv(here::here("data/clean/forIPM/recruit.yr.ipm.csv"))
+srdat <- read_csv(here::here("data/clean/forIPM/srdat.csv"))
+pdat <- read_csv(here::here("data/clean/forIPM/pdat.csv"))
+sexratio_summary <- read.csv(here::here("data/clean/sexratio_summary.csv"))
+
+##covariates
+dist.all <- readRDS(here::here("data/clean/forIPM/dist.all.rds"))
+clim1 <- readRDS(here::here("data/clean/forIPM/clim1.rds"))
+clim2 <- readRDS(here::here("data/clean/forIPM/clim1.rds"))
+
+##other
+#first_per_herd <- read_csv(here::here("data/clean/forIPM/first_per_herd.csv"))
+month_offset <- read_csv(here::here("data/clean/forIPM/month_offset.csv"))
+grp_p <- read_csv(here::here("data/clean/forIPM/grp_p.csv"))
+single.params <- read_csv(here::here("data/clean/forIPM/single.params.csv"))
+meancount<- read_csv(here::here("data/clean/forIPM/meancount.csv"))
+priors<- read_csv(here::here("data/clean/forIPM/priors.csv"))
+
+
+# ##without Jasper
+# ##demographic data
+# cdat <- read_csv(here::here("data/clean/forIPM/wo_Jasp/cdat.csv"))
+# edat <- read_csv(here::here("data/clean/forIPM/wo_Jasp/edat.csv"))
+# sdat <- read_csv(here::here("data/clean/forIPM/wo_Jasp/sdat.csv"))
+# rdat <- read_csv(here::here("data/clean/forIPM/wo_Jasp/rdat.csv"))
+# srdat <- read_csv(here::here("data/clean/forIPM/wo_Jasp/srdat.csv"))
+# pdat <- read_csv(here::here("data/clean/forIPM/wo_Jasp/pdat.csv"))
+# sexratio_summary <- read.csv(here::here("data/clean/sexratio_summary.csv"))
+# 
+# ##covariates
+# dist.all <- readRDS(here::here("data/clean/forIPM/wo_Jasp/dist.all.rds"))
+# clim1 <- readRDS(here::here("data/clean/forIPM/wo_Jasp/clim1.rds"))
+# 
+# ##other
+# first_per_herd <- read_csv(here::here("data/clean/forIPM/wo_Jasp/first_per_herd.csv"))
+# month_offset <- read_csv(here::here("data/clean/forIPM/wo_Jasp/month_offset.csv"))
+# grp_p <- read_csv(here::here("data/clean/forIPM/wo_Jasp/grp_p.csv"))
+# single.params <- read_csv(here::here("data/clean/forIPM/wo_Jasp/single.params.csv"))
+# meancount<- read_csv(here::here("data/clean/forIPM/wo_Jasp/meancount.csv"))
+```
+
+## Prep data for IPM
+```{r Prep data for IPM, results='hide', message=FALSE, warning=FALSE}
+
+# Herds and herd number
+nherd <- single.params$nherd
+nsight_grp <- single.params$nsight_grp
+nage <- single.params$nage
+
+#  Years of study
+nyr <- single.params$nyr
+
+
+mean_grp_p <- grp_p$mean_grp_p
+mean_grp_ptau <- grp_p$mean_grp_ptau
+
+sgt_grp_ind <- matrix(nrow = nherd, ncol = nyr)
+for(sg in 1:nrow(sgt_grp_ind)){
+	sgt_grp_ind[sg,] <- hd$sight_grp[hd$herd_num == sg]
+	}
+
+
+##starting age class distribution (sensitivity tested this in McNay et al. 2022 and it doesnt have a meaningful effect even if substantially changed)
+n1s <- meancount$n1_mean
+n1 <- matrix(NA, nrow = nherd, ncol = nage)
+for(h in 1:nherd){
+	n1[h,1] <- (n1s[h]*0.5)*0.15
+	n1[h,2] <- (n1s[h]*0.64)*0.85 
+	}
+
+
+meansr <- array(NA, c(1,2))
+meansr[1,1] <- sexratio_summary[1,1]
+meansr[1,2] <- 1/(sexratio_summary[1,2]^2)
+
+
+first <- rep(1,nherd)
+
+```
+
+
+
+## Gather data inputs in a list
+```{r Gather data inputs in a list, results='hide', message=FALSE, warning=FALSE}
+ipm_dat <- list(
+	nherd = nherd,
+	nyr = nyr,
+	first = first,
+	
+	month_offset = month_offset,
+	
+	nc = single.params$nc, 
+	ne = single.params$ne,
+	ns = single.params$ns,
+	nr = single.params$nr,
+	nsr = single.params$nsr,
+	
+	nsight_grp = nsight_grp,
+	sight_grp = hd$sight_grp,
+	
+	mean_grp_p = mean_grp_p,
+	mean_grp_ptau = mean_grp_ptau,
+	meansr = meansr,
+	
+	n1 = n1, 
+	cdat = cdat,
+	edat = edat,
+	sdat = sdat,
+	srdat = srdat,
+	pdat = pdat,
+	rdat = rdat,
+	
+	dist = dist.all, 
+	clim1 = clim1,
+	clim2= clim2,
+	
+  prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
+	prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
+	prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
+	prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
+	prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
+	prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+
+  prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
+	prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
+	prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
+	prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
+	prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
+	prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+	  )
+	
+	
+#  Initial values for N to avoid parent node erros
+#  Indexing was off here
+Nst <- array(NA_integer_, c(nherd, nyr, nage))
+
+for(h in 1:nherd) {
+  for(a in 1:nage) {
+    Nst[h, first[h]:nyr, a] <- as.integer(
+      max(
+        c(n1[h, a], cdat$mu[cdat$herd == h], edat$mu[edat$herd == h])))  
+  }
+}
+
+ipm_inits <- function(){ 
+  list(
+    N = Nst
+	)
+}
+
+
+#  Model parameters to monitor
+model_parms <- c(
+
+	"adj_totNMF", "totN", "N", 
+	"totCalves", "totAdults", "totAdultsMF", "totCalvesMF", "totNMF", 
+
+	"lambda", "logla",
+	
+	"S", "R",  "R_adj",
+	"p_mu", "sight_est", "p",
+	
+	"muS", "muR",
+	
+	"offset",
+	
+	"pred_totNMF",
+	"pred_totCalvesMF",
+	"pred_totAdultsMF",
+	"mean_R",
+	"mean_S",
+	"sexratio",
+	
+		"beta.dist.s",
+	"beta.clim1.s",
+	"beta.clim2.s",
+		"beta.dist.r",
+	"beta.clim1.r",
+	"beta.clim2.r"
+	)
+```
+
+
+## Run IPM
+```{r Run IPM, results='hide', message=FALSE, warning=FALSE}
+nth <- 50
+nbu <- 2000 
+nch <- 3
+nad <- 2000
+nit <- 30000 
+
+out <- jagsUI::jags(ipm_dat, 
+	inits = ipm_inits,
+	model_parms,
+	model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+saveRDS(out, file = here::here("jags/output/dist_clim_tests.rds"))
+```
+
+## Save outputs
+```{r Save outputs, results='hide', message=FALSE, warning=FALSE}
+#mcmcplots::mcmcplot(out$samples, par = c("S", "R", "totNMF")) 
+
+# mcmcplots::mcmcplot(out$samples, par = c("muR", "beta.clim1.r","beta.clim2.r","beta.dist.r",
+#                                          "muS", "beta.clim1.s","beta.clim2.s", "beta.dist.s"))
+# 
+# out%>%
+#   gather_draws(dist.s,dist.r,
+#                clim1.s,clim1.r)%>%
+#   median_qi()
+
+##PRIORS W/O IPM and counts, missing most AB herds
+# 1 clim1.r     0.461   0.434  0.489    0.95 median qi       
+# 2 clim1.s    -0.0467 -0.139  0.0369   0.95 median qi       
+# 3 dist.r  0.0779  0.0601 0.0972   0.95 median qi       
+# 4 dist.s  0.889   0.694  1.13     0.95 median qi  
+
+##with priors, all herds, sd=0.05, with sdat filtered between 0.50-0.99
+# 1 clim1.r     0.334   0.307   0.365   0.95 median qi       
+# 2 clim1.s    -0.292  -0.344  -0.244   0.95 median qi       
+# 3 dist.r  0.103   0.0853  0.121   0.95 median qi       
+# 4 dist.s  0.0759  0.0327  0.126   0.95 median qi    
+
+##with priors, <without Jasper>, sd=0.05, with sdat filtered between 0.50-0.99
+# 1 clim1.r     0.354  0.325   0.386   0.95 median qi       
+# 2 clim1.s    -0.202 -0.263  -0.144   0.95 median qi       
+# 3 dist.r -0.232 -0.258  -0.205   0.95 median qi       
+# 4 dist.s  0.107  0.0431  0.171   0.95 median qi 
+
+## <without priors>, all herds, sd=0.05, with sdat filtered between 0.50-0.99
+##no effect
+# 1 clim1.r     0.335   0.303    0.365   0.95 median qi       
+# 2 clim1.s    -0.284  -0.338   -0.205   0.95 median qi       
+# 3 dist.r  0.103   0.0858   0.120   0.95 median qi       
+# 4 dist.s  0.0728  0.00946  0.146   0.95 median qi   
+
+##with priors, all herds, <sd=0.15>, with sdat filtered between 0.50-0.99
+# 1 clim1.r     0.0720  0.0352  0.106    0.95 median qi       
+# 2 clim1.s    -0.135  -0.188  -0.0789   0.95 median qi       
+# 3 dist.r -0.0125 -0.0427  0.0169   0.95 median qi       
+# 4 dist.s -0.0154 -0.0699  0.0341   0.95 median qi   
+
+##with priors, all herds, <sd=0.01>, with sdat filtered between 0.50-0.99
+# 1 clim1.r     1.21   1.18   1.24    0.95 median qi       
+# 2 clim1.s    -0.302 -0.355 -0.195   0.95 median qi       
+# 3 dist.r -0.357 -0.387 -0.326   0.95 median qi       
+# 4 dist.s  0.473  0.402  0.698   0.95 median qi  
+
+##with priors, all herds, sd=0.05, <with sdat unfiltered>
+# 1 clim1.r     1.21   1.18   1.25    0.95 median qi       
+# 2 clim1.s    -0.267 -0.341 -0.177   0.95 median qi       
+# 3 dist.r -0.356 -0.389 -0.325   0.95 median qi       
+# 4 dist.s  0.521  0.413  0.713   0.95 median qi 
+
+##double check to make sure enough iters to get ~stable results, this should be similar to above.
+##with priors, all herds, sd=0.05, <with sdat unfiltered>
+# 1 clim1.r     1.21   1.18   1.24    0.95 median qi       
+# 2 clim1.s    -0.292 -0.347 -0.189   0.95 median qi       
+# 3 dist.r -0.357 -0.388 -0.326   0.95 median qi       
+# 4 dist.s  0.493  0.391  0.671   0.95 median qi   
+
+##with priors, all herds, sd=0.05, with sdat filtered between 0.50-0.99, <remove all transplants and post from data>
+# 1 clim1.r     0.362   0.331   0.393   0.95 median qi       
+# 2 clim1.s    -0.287  -0.349  -0.220   0.95 median qi       
+# 3 dist.r  0.106   0.0882  0.123   0.95 median qi       
+# 4 dist.s  0.0956  0.0378  0.154   0.95 median qi 
+
+##what is consistent between runs?
+# dist.s is +, except with sd=0.15, but overlaps 0, magnitude differs between runs
+# clim1.r is +, magnitude differs between runs
+# clim1.s is -, magnitude differs between runs
+# dist.r is + at 0.05, with and without priors, bascially 0 with sd=0.15, but - otherwise.
+# priors have very little influence
+
+
+draws <- out%>%
+  gather_draws(muS, beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	             muR, beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  mutate(type="Posteriors")%>%
+  rbind(read_csv(here::here("tables/prior.draws.csv")))
+
+draws%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
+ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+    geom_vline(xintercept = 0, linetype="dashed")
+
+```
+
+#### RUN again but with only herds with survival data
+```{r Gather data inputs in a list, results='hide', message=FALSE, warning=FALSE}
+surv.herds <- sdat%>%
+  distinct(herd)%>%
+  pull(herd)
+
+ipm_dat2 <- list(
+	nherd = nherd,
+	nyr = nyr,
+	first = first,
+	
+	month_offset = month_offset,
+	
+	nc = nrow(cdat%>%
+	  filter(herd%in%surv.herds)), 
+	ne = nrow(edat%>%
+	  filter(herd%in%surv.herds)),
+	ns = nrow(sdat%>%
+	  filter(herd%in%surv.herds)),
+	nr = nrow(rdat%>%
+	  filter(herd%in%surv.herds)),
+	nsr = nrow(srdat%>%
+	  filter(herd%in%surv.herds)),
+	
+	nsight_grp = nsight_grp,
+	sight_grp = hd$sight_grp,
+	
+	mean_grp_p = mean_grp_p,
+	mean_grp_ptau = mean_grp_ptau,
+	meansr = meansr,
+	
+	n1 = n1, 
+	cdat = cdat%>%
+	  filter(herd%in%surv.herds),
+	edat = edat%>%
+	  filter(herd%in%surv.herds),
+	sdat = sdat%>%
+	  filter(herd%in%surv.herds),
+	srdat = srdat%>%
+	  filter(herd%in%surv.herds),
+	pdat = pdat%>%
+	  filter(herd%in%surv.herds),
+	rdat = rdat%>%
+	  filter(herd%in%surv.herds),
+	
+	dist = dist.all, 
+	clim1 = clim1,
+	clim2= clim2,
+	
+  prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
+	prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
+	prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
+	prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
+	prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
+	prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+
+  prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
+	prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
+	prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
+	prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
+	prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
+	prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+	  )
+
+nth <- 50
+nbu <- 2000 
+nch <- 3
+nad <- 2000
+nit <- 30000 
+
+out2 <- jagsUI::jags(ipm_dat2, 
+	inits = ipm_inits,
+	model_parms,
+	model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+saveRDS(out2, file = here::here("jags/output/dist_clim_tests_survherds.rds"))
+
+draws2 <- out2%>%
+  gather_draws(muS, beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	             muR, beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  mutate(type="Posteriors-survherds")%>%
+  rbind(draws)
+
+draws2%>%
+  filter(!.variable%in%c("beta.season.r"))%>%
+ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+    geom_vline(xintercept = 0, linetype="dashed")
+```
+
+#### RUN again but with only S and R data
+```{r Gather data inputs in a list, results='hide', message=FALSE, warning=FALSE}
+ipm_dat3 <- list(
+	nherd = nherd,
+	nyr = nyr,
+	first = first,
+	
+	month_offset = month_offset,
+	
+	nc = 1, 
+	ne = 1,
+	ns = single.params$ns,
+	nr = single.params$nr,
+	nsr = 1,
+	
+	nsight_grp = nsight_grp,
+	sight_grp = hd$sight_grp,
+	
+	mean_grp_p = mean_grp_p,
+	mean_grp_ptau = mean_grp_ptau,
+	meansr = meansr,
+	
+	n1 = n1, 
+	cdat = cdat%>%slice(1),
+	edat = edat%>%slice(1),
+	sdat = sdat,
+	srdat = srdat%>%slice(1),
+	pdat = pdat%>%slice(1),
+	rdat = rdat,
+	
+	dist = dist.all, 
+	clim1 = clim1,
+	clim2= clim2,
+	
+  prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
+	prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
+	prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
+	prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
+	prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
+	prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+
+  prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
+	prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
+	prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
+	prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
+	prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
+	prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+	  )
+
+nth <- 50
+nbu <- 2000 
+nch <- 3
+nad <- 2000
+nit <- 30000 
+
+out3 <- jagsUI::jags(ipm_dat3, 
+	inits = ipm_inits,
+	model_parms,
+	model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+saveRDS(out3, file = here::here("jags/output/dist_clim_tests_s_r.rds"))
+
+draws3 <- out3%>%
+  gather_draws(muS,beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	             muR,beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  mutate(type="Posteriors-S+R")%>%
+  rbind(draws2)
+
+draws3%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
+ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+    geom_vline(xintercept = 0, linetype="dashed")
+```
+
+
+#### RUN again but without Itchas
+```{r Gather data inputs in a list, results='hide', message=FALSE, warning=FALSE}
+ipm_dat4 <- list(
+	nherd = nherd,
+	nyr = nyr,
+	first = first,
+	
+	month_offset = month_offset,
+	
+	nc = nrow(cdat%>%
+	  filter(!herd%in%18)), 
+	ne = nrow(edat%>%
+	  filter(!herd%in%18)),
+	ns = nrow(sdat%>%
+	  filter(!herd%in%18)),
+	nr = nrow(rdat%>%
+	  filter(!herd%in%18)),
+	nsr = nrow(srdat%>%
+	  filter(!herd%in%18)),
+	
+	nsight_grp = nsight_grp,
+	sight_grp = hd$sight_grp,
+	
+	mean_grp_p = mean_grp_p,
+	mean_grp_ptau = mean_grp_ptau,
+	meansr = meansr,
+	
+	n1 = n1, 
+	cdat = cdat%>%
+	  filter(!herd%in%18),
+	edat = edat%>%
+	  filter(!herd%in%18),
+	sdat = sdat%>%
+	  filter(!herd%in%18),
+	srdat = srdat%>%
+	  filter(!herd%in%18),
+	pdat = pdat%>%
+	  filter(!herd%in%18),
+	rdat = rdat%>%
+	  filter(!herd%in%18),
+	
+	dist = dist.all, 
+	clim1 = clim1,
+	clim2= clim2,
+	
+  prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
+	prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
+	prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
+	prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
+	prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
+	prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+
+  prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
+	prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
+	prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
+	prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
+	prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
+	prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+	  )
+
+nth <- 50
+nbu <- 2000 
+nch <- 3
+nad <- 2000
+nit <- 30000 
+
+out4 <- jagsUI::jags(ipm_dat4, 
+	inits = ipm_inits,
+	model_parms,
+	model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+saveRDS(out4, file = here::here("jags/output/dist_clim_tests_noitcha.rds"))
+
+draws4 <- out4%>%
+  gather_draws(muS,beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	             muR,beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  mutate(type="Posteriors-noItcha")%>%
+  rbind(draws3)
+
+draws4%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
+ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+    geom_vline(xintercept = 0, linetype="dashed")
+
+draws4%>%
+  filter(!.variable%in%c("beta.season.r","muS","muR"))%>%
+  group_by(type,.variable)%>%
+  summarise(mean=mean(.value),
+            sd=sd(.value))%>%
+ggplot(aes(x=mean, xmin=mean-sd, xmax=mean+sd, y=.variable, color=type))+
+  geom_point(alpha=0.5, position=position_dodge(0.4))+
+  geom_linerange(alpha=0.5, position=position_dodge(0.4))+
+    geom_vline(xintercept = 0, linetype="dashed")
+```
+
+
+#### Still fucked. As soon as I add N data, disturbance is + with S, why?
+```{r Gather data inputs in a list, results='hide', message=FALSE, warning=FALSE}
+
+lambda <- out$mean$S%>%
+  as_tibble()%>%
+  mutate(herd=rownames(.))%>%
+  pivot_longer(-herd)%>%
+  rename(year=name,
+         lambda=value)%>%
+  mutate(year=parse_number(year))
+
+dist.long<- dist.all%>%
+  as_tibble()%>%
+  mutate(herd=rownames(.))%>%
+  pivot_longer(-herd)%>%
+  rename(year=name,
+         dist=value)%>%
+  mutate(year=parse_number(year))
+
+lamba.dist.long <- lambda%>%
+  left_join(dist.long, by=c("herd", "year"))%>%
+  filter(year!=1)
+
+ggplot(lamba.dist.long,
+       aes(x=dist, y=lambda, col=herd))+
+         geom_point()
+         geom_smooth()
+
+
+```
+
+#### RUN again but without herd at small pop sizes
+```{r Gather data inputs in a list, results='hide', message=FALSE, warning=FALSE}
+
+
+last <- read_csv("/Users/claytonlamb/Dropbox/Documents/University/Work/WSC/CaribouIPM_BCAB/tables/demog.csv")%>%
+  filter(totNMF<20)%>%
+  group_by(herd,i)%>%
+  summarise(yrs=min(yrs))%>%
+  left_join(yr_df, by="yrs")%>%
+  ungroup%>%
+  select(i,yr_idx)%>%
+  mutate(yr_idx=replace_na(yr_idx,1))%>%
+  rbind(tibble(i=1:nherd,yr_idx=nyr))%>%
+  group_by(i)%>%
+  summarise(yrs=min(yr_idx))%>%
+  ungroup%>%
+  arrange(i)%>%
+  rename(herd=i)
+  
+ipm_dat5 <- list(
+	nherd = nherd,
+	nyr = nyr,
+	first = first,
+	last=last$yrs,
+	
+	month_offset = month_offset,
+	
+	nc = nrow(cdat%>%left_join(last, by="herd")%>%filter(year<=yrs)), 
+	ne = nrow(edat%>%left_join(last, by="herd")%>%filter(year<=yrs)),
+	ns = nrow(edat%>%left_join(last, by="herd")%>%filter(year<=yrs)),
+	nr = nrow(rdat%>%left_join(last, by="herd")%>%filter(year<=yrs)),
+	nsr = nrow(srdat%>%left_join(last, by="herd")%>%filter(year<=yrs)),
+	
+	nsight_grp = nsight_grp,
+	sight_grp = hd$sight_grp,
+	
+	mean_grp_p = mean_grp_p,
+	mean_grp_ptau = mean_grp_ptau,
+	meansr = meansr,
+	
+	n1 = n1, 
+	cdat = cdat%>%left_join(last, by="herd")%>%filter(year<=yrs),
+	edat = edat%>%left_join(last, by="herd")%>%filter(year<=yrs),
+	sdat = sdat%>%left_join(last, by="herd")%>%filter(year<=yrs),
+	srdat = srdat%>%left_join(last, by="herd")%>%filter(year<=yrs),
+	pdat = pdat%>%left_join(last, by="herd")%>%filter(year<=yrs),
+	rdat = rdat%>%left_join(last, by="herd")%>%filter(year<=yrs),
+	
+	dist = dist.all, 
+	clim1 = clim1,
+	clim2= clim2,
+	
+  prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
+	prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
+	prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
+	prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
+	prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
+	prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+
+  prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
+	prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
+	prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
+	prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
+	prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
+	prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+	  )
+  
+nth <- 50
+nbu <- 2000 
+nch <- 3
+nad <- 2000
+nit <- 30000 
+
+out5 <- jagsUI::jags(ipm_dat5, 
+	inits = ipm_inits,
+	model_parms,
+	model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+saveRDS(out5, file = here::here("jags/output/dist_clim_tests_nosmall.rds"))
+
+draws5 <- out5%>%
+  gather_draws(muS,beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	             muR,beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  mutate(type="Posteriors-nosmall")%>%
+  rbind(draws4)
+
+draws5%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
+ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+    geom_vline(xintercept = 0, linetype="dashed")
+
+draws5%>%
+  filter(!.variable%in%c("beta.season.r","muS","muR"))%>%
+  group_by(type,.variable)%>%
+  summarise(mean=mean(.value),
+            sd=sd(.value))%>%
+ggplot(aes(x=mean, xmin=mean-sd, xmax=mean+sd, y=.variable, color=type))+
+  geom_point(alpha=0.5, position=position_dodge(0.4))+
+  geom_linerange(alpha=0.5, position=position_dodge(0.4))+
+    geom_vline(xintercept = 0, linetype="dashed")
+```
+
+
+#### RUN again but without Itchas, transplant herds, and AB herds
+```{r Gather data inputs in a list, results='hide', message=FALSE, warning=FALSE}
+ipm_dat7 <- list(
+	nherd = nherd,
+	nyr = nyr,
+	first = first,
+	
+	month_offset = month_offset,
+	
+	nc = nrow(cdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35))), 
+	ne = nrow(edat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35))),
+	ns = nrow(sdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35))),
+	nr = nrow(rdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35))),
+	nsr = nrow(srdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35))),
+	
+	nsight_grp = nsight_grp,
+	sight_grp = hd$sight_grp,
+	
+	mean_grp_p = mean_grp_p,
+	mean_grp_ptau = mean_grp_ptau,
+	meansr = meansr,
+	
+	n1 = n1, 
+	cdat = cdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35)),
+	edat = edat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35)),
+	sdat = sdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35)),
+	srdat = srdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35)),
+	pdat = pdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35)),
+	rdat = rdat%>%
+	  filter(!herd%in%c(1,2,4,21,24,32,36,18,7,29,33,35)),
+	
+	dist = dist.all, 
+	clim1 = clim1,
+	clim2= clim2,
+	
+  prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
+	prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
+	prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
+	prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
+	prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
+	prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+
+  prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
+	prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
+	prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
+	prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
+	prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
+	prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+	  )
+
+nth <- 50
+nbu <- 2000 
+nch <- 3
+nad <- 2000
+nit <- 30000 
+
+out7 <- jagsUI::jags(ipm_dat7, 
+	inits = ipm_inits,
+	model_parms,
+	model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+saveRDS(out7, file = here::here("jags/output/dist_clim_tests_noitcha_transplant_orAB.rds"))
+
+draws7 <- out7%>%
+  gather_draws(muS,beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	             muR,beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  mutate(type="Posteriors-noItcha,transplant, or AB")%>%
+  rbind(draws6)
+
+draws7%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
+ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+    geom_vline(xintercept = 0, linetype="dashed")
+
+draws7%>%
+  filter(!.variable%in%c("beta.season.r","muS","muR"))%>%
+  group_by(type,.variable)%>%
+  summarise(mean=mean(.value),
+            sd=sd(.value))%>%
+ggplot(aes(x=mean, xmin=mean-sd, xmax=mean+sd, y=.variable, color=type))+
+  geom_point(alpha=0.5, position=position_dodge(0.4))+
+  geom_linerange(alpha=0.5, position=position_dodge(0.4))+
+    geom_vline(xintercept = 0, linetype="dashed")
+```

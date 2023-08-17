@@ -1,0 +1,540 @@
+---
+title: "prep priors"
+author: "Clayton T. Lamb"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: github_document
+---
+
+
+```{r render, eval=FALSE,include=FALSE}
+# rmarkdown::render(here::here("jags", 'run_IPM.Rmd'),
+#                   output_file =  "README.md")
+# 
+# knitr::purl(input=here::here("jags", 'run_IPM.Rmd'),
+#                   output =  here::here("scripts_r", '2.run_IPM.r'))
+```
+
+
+## Load Data
+```{r Load packages and data, results='hide', message=FALSE, warning=FALSE}
+library(tidybayes)
+library(ggmcmc)
+library(hrbrthemes)
+library(boot)
+library(lme4)
+library(ggrepel)
+library(survival)
+library(survminer)
+library(ggeffects)
+library(sjPlot)
+library(MuMIn)
+library(broom)
+library(tidylog)
+library(tidyverse)
+
+# Load data ---------------------------------------------------------------
+hd <- read.csv(here::here("data/clean/blueprint.csv"))
+hn <- hd %>%
+	dplyr::select(herd, herd_num)
+
+##demographic data
+surv.yr.priors <- read_csv(here::here("data/clean/forIPM/surv.yr.priors.csv"))
+surv.yr.ipm <- read_csv(here::here("data/clean/forIPM/surv.yr.ipm.csv"))
+recruit.yr.priors <- read_csv(here::here("data/clean/forIPM/recruit.yr.priors.csv"))
+recruit.yr.ipm <- read_csv(here::here("data/clean/forIPM/recruit.yr.ipm.csv"))
+
+##covariates
+dist.all <- readRDS(here::here("data/clean/forIPM/dist.all.rds"))
+clim1 <- readRDS(here::here("data/clean/forIPM/clim1.rds"))
+clim2 <- readRDS(here::here("data/clean/forIPM/clim2.rds"))
+covariates <- read_csv(here::here("data/clean/forIPM/covariates_scaled.csv"))
+
+##other
+month_offset <- read_csv(here::here("data/clean/forIPM/month_offset.csv"))
+single.params <- read_csv(here::here("data/clean/forIPM/single.params.csv"))
+yr_df <- read_csv(here::here("data/clean/forIPM/yr_df.csv"))
+
+##plot data
+rdat.plot <- read_csv(here::here("data/clean/forIPM/rdat.plot.csv"))
+sdat.plot <- read_csv(here::here("data/clean/forIPM/sdat.plot.csv"))
+```
+
+## look at raw data relationships
+```{r Plot raw, message=FALSE, warning=FALSE, include=FALSE, results='hide', eval=FALSE}
+##Survival
+
+##make sure results are the same between scaled and not
+ggplot(sdat.plot)+
+  geom_point(aes(x=value, y=est, ymin=est-sqrt(1/tau), ymax=est+sqrt(1/tau), color=herd))+
+  geom_linerange(aes(x=value, y=est, ymin=est-sqrt(1/tau), ymax=est+sqrt(1/tau), color=herd),alpha=0.3)+
+  geom_smooth(method = "lm", se = FALSE,aes(x=value, y=est), color="black")+
+  geom_smooth(method = "loess", se = FALSE,aes(x=value, y=est), color="black", linetype="dashed")+
+  facet_wrap(vars(name), scales="free_x")+
+  guides(color="none")+
+  theme_ipsum() +
+    theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15))+
+  labs(x="Value", y=("Survival"), title="Annual S across herds, by climate and disturbance")
+
+sdat.plot.noscaled <- sdat.plot%>%filter(!str_detect(name,"scale"))
+
+ggplot(sdat.plot.noscaled)+
+  geom_point(aes(x=value, y=est, ymin=est-sqrt(1/tau), ymax=est+sqrt(1/tau), color=herd))+
+  geom_linerange(aes(x=value, y=est, ymin=est-sqrt(1/tau), ymax=est+sqrt(1/tau), color=herd),alpha=0.3)+
+  geom_smooth(method = "lm", se = FALSE,aes(x=value, y=est), color="black")+
+  geom_smooth(method = "loess", se = FALSE,aes(x=value, y=est), color="black", linetype="dashed")+
+  facet_wrap(vars(name), scales="free_x")+
+  guides(color="none")+
+  theme_ipsum() +
+    theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15))+
+  labs(x="Value (unscaled)", y=("Survival"), title="Annual S across herds, by climate and disturbance")
+
+ggsave(here::here("data/plots", "S.all.png"), width = 10, height = 6, bg = "white")
+
+ggplot(sdat.plot.noscaled,aes(x=value, y=est, ymin=est-sqrt(1/tau), ymax=est+sqrt(1/tau), color=herd))+
+  geom_point()+
+  geom_linerange(alpha=0.3)+
+  geom_smooth(method = lm, se = FALSE)+
+  facet_wrap(vars(name), scales="free_x")+
+  guides(color="none")+
+    theme_ipsum() +
+    theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15))+
+  labs(x="Value (unscaled)", y=("Survival"), title="Annual S regress within herds, by climate and disturbance")
+
+ggsave(here::here("data/plots", "S.byherd.annual.png"), width = 10, height = 6, bg = "white")
+
+glm(est~dist.all+clim1+clim2, data=sdat.plot.noscaled%>%pivot_wider())%>%summary()
+lmer(est~dist.all+clim1+clim2+ (1+dist.all|herd), data=sdat.plot.noscaled%>%pivot_wider())%>%summary()
+
+
+ggplot(sdat.plot.noscaled%>%
+         group_by(herd,name)%>%
+         summarise(sd=sd(est),
+                   est=mean(est),
+                   value=mean(value,na.rm=TRUE))
+         )+
+  geom_point(aes(x=value, y=est, color=herd))+
+  geom_linerange(aes(x=value, y=est, ymin=est-sd, ymax=est+sd, color=herd),alpha=0.3)+
+  geom_smooth(data=sdat.plot.noscaled%>%
+         group_by(herd,name)%>%
+         summarise(sd=sd(est),
+                   est=mean(est),
+                   value=mean(value,na.rm=TRUE))%>%
+         filter(!herd%in%c("Tonquin","Brazeau","Maligne")),
+         method = "lm", se = FALSE,aes(x=value, y=est), color="black", linetype="dashed")+
+    geom_smooth(data=sdat.plot.noscaled%>%
+         group_by(herd,name)%>%
+         summarise(sd=sd(est),
+                   est=mean(est),
+                   value=mean(value,na.rm=TRUE)),
+         method = "lm", se = FALSE,aes(x=value, y=est), color="black")+
+  geom_text_repel(aes(x=value, y=est, label=herd), min.segment.length = 0, seed = 42, box.padding = 0.3 , size=2) +
+  facet_wrap(vars(name), scales="free_x")+
+  guides(color="none")+
+  theme_ipsum() +
+    theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15))+
+  labs(x="Value (unscaled)", y=("Survival"), title="Average annual S for each herd, by climate and disturbance",
+       subtitle="Dashed is without Jasper herds")
+
+ggsave(here::here("data/plots", "S.byherd.average.png"), width = 10, height = 6, bg = "white")
+
+
+###now with only herds we have in surv.yr
+# ggplot(sdat.plot.noscaled%>%
+#          group_by(herd,name)%>%
+#          summarise(sd=sd(mu),
+#                    mu=mean(mu),
+#                    value=mean(value,na.rm=TRUE))
+#          )+
+#   geom_point(aes(x=value, y=mu, color=herd))+
+#   geom_linerange(aes(x=value, y=mu, ymin=mu-sd, ymax=mu+sd, color=herd),alpha=0.3)+
+#   geom_smooth(data=sdat.plot.noscaled%>%
+#          filter(paste0(herd,year) %in% paste0(surv.yr$herd,surv.yr$year))%>%
+#          group_by(herd,name)%>%
+#          summarise(sd=sd(mu),
+#                    mu=mean(mu),
+#                    value=mean(value,na.rm=TRUE)),
+#          method = "lm", se = FALSE,aes(x=value, y=mu), color="black", linetype="dashed")+
+#     geom_smooth(data=sdat.plot.noscaled%>%
+#          group_by(herd,name)%>%
+#          summarise(sd=sd(mu),
+#                    mu=mean(mu),
+#                    value=mean(value,na.rm=TRUE)),
+#          method = "lm", se = FALSE,aes(x=value, y=mu), color="black")+
+#   geom_text_repel(aes(x=value, y=mu, label=herd), min.segment.length = 0, seed = 42, box.padding = 0.3 , size=2) +
+#   facet_wrap(vars(name), scales="free_x")+
+#   guides(color="none")+
+#   theme_ipsum() +
+#     theme(
+#     axis.title.x = element_text(size = 15),
+#     axis.title.y = element_text(size = 15))+
+#   labs(x="Value (unscaled)", y=("Survival"), title="Average annual S for each herd, by climate and disturbance",
+#        subtitle="Dashed is only with herd-years in surv.yr")
+
+
+
+# cor(covariates$dist.all,covariates$clim1)
+# cor(covariates$dist.all,covariates$clim2)
+# cor(covariates$clim1,covariates$clim2)
+
+glm(mu~dist.all+clim1+clim2, data=sdat.plot.noscaled%>%
+         group_by(herd,name)%>%
+         summarise(sd=sd(mu),
+                   mu=mean(mu),
+                   value=mean(value,na.rm=TRUE))%>%
+         #filter(!herd%in%c("Tonquin","Brazeau","Maligne"))%>%
+      pivot_wider()
+    )%>%summary()
+
+
+##Recruitment
+rdat.plot.noscaled <- rdat.plot%>%filter(!str_detect(name,"scale"))
+ggplot(rdat.plot.noscaled)+
+  geom_point(aes(x=value, y=mu, ymin=mu-sqrt(1/tau), ymax=mu+sqrt(1/tau), color=herd, shape=as.factor(season)))+
+  geom_linerange(aes(x=value, y=mu, ymin=mu-sqrt(1/tau), ymax=mu+sqrt(1/tau), color=herd),alpha=0.3)+
+  geom_smooth(data=rdat.plot.noscaled%>%
+                filter(season==10), method = "lm", se = FALSE,aes(x=value, y=mu), color="black")+
+  facet_wrap(vars(name), scales="free_x")+
+  guides(color="none")+
+  theme_ipsum() +
+    theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15))+
+  labs(x="Value (unscaled)", y=("Recruitment"), 
+       title="Annual R across herds, by climate and disturbance",
+       subtitle="Regression only includes March surveys",
+       shape="Calf age (mo)")
+
+ggsave(here::here("data/plots", "R.all.png"), width = 10, height = 6, bg = "white")
+
+ggplot(rdat.plot.noscaled,aes(x=value, y=mu, ymin=mu-sqrt(1/tau), ymax=mu+sqrt(1/tau), color=herd, shape=as.factor(season)))+
+  geom_point()+
+  geom_linerange(alpha=0.3)+
+  geom_smooth(method = lm, se = FALSE)+
+  facet_wrap(vars(name), scales="free_x")+
+  guides(color="none")+
+    theme_ipsum() +
+    theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15))+
+  labs(x="Value (unscaled)", y=("Recruitment"), 
+       title="Annual R regress within herds, by climate and disturbance",
+       subtitle="Note survey times differ",
+       shape="Calf age (mo)")
+
+ggsave(here::here("data/plots", "R.byherd.annual.png"), width = 10, height = 6, bg = "white")
+
+glm(mu~dist.all+clim1+clim2+season, data=rdat.plot.noscaled%>%pivot_wider())%>%summary()
+lmer(mu~dist.all+clim1+clim2+(1+dist.all|herd), data=rdat.plot.noscaled%>%pivot_wider())%>%summary()
+
+
+ggplot(rdat.plot.noscaled%>%
+         group_by(herd,name,season)%>%
+         summarise(sd=sd(mu),
+                   mu=mean(mu),
+                   value=mean(value,na.rm=TRUE))
+         )+
+  geom_point(aes(x=value, y=mu, color=herd, shape=as.factor(season)))+
+  geom_linerange(aes(x=value, y=mu, ymin=mu-sd, ymax=mu+sd, color=herd),alpha=0.3)+
+    geom_smooth(data=rdat.plot.noscaled%>%
+                filter(season==10)%>%
+         group_by(herd,name)%>%
+         summarise(sd=sd(mu),
+                   mu=mean(mu),
+                   value=mean(value,na.rm=TRUE)),
+         method = "lm", se = FALSE,aes(x=value, y=mu), color="black")+
+  geom_text_repel(aes(x=value, y=mu, label=herd), min.segment.length = 0, seed = 42, box.padding = 0.3 , size=2) +
+  facet_wrap(vars(name), scales="free_x")+
+  guides(color="none")+
+  theme_ipsum() +
+    theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15))+
+  labs(x="Value (scaled)", y=("Recruitment"), title="Average annual R for each herd, by climate and disturbance",
+       subtitle="Regression only includes March surveys")
+
+ggsave(here::here("data/plots", "R.byherd.average.png"), width = 10, height = 6, bg = "white")
+
+
+glm(mu~dist.all+clim1+season, data=rdat.plot.noscaled%>%
+         group_by(herd,name,season)%>%
+         summarise(sd=sd(mu),
+                   mu=mean(mu),
+                   value=mean(value,na.rm=TRUE))%>%
+         #filter(!herd%in%c("Tonquin","Brazeau","Maligne"))%>%
+      pivot_wider()
+    )%>%summary()
+
+```
+
+
+## Look at relationships via raw survival data and frequentist surv models
+```{r Freq surv, results='hide', message=FALSE, warning=FALSE}
+### Check quick
+fit <- survfit(Surv(time, event) ~ herd, data = surv.yr.priors)
+ggsurvplot(fit,
+           pval = TRUE,
+           # risk.table = TRUE, # Add risk table
+           risk.table.col = "strata", # Change risk table color by groups
+           risk.table.height = 0.5,
+           ggtheme = theme_ipsum(), # Change ggplot2 theme
+           ylim = c(0.5, 1),
+           xlim = c(0, 360)
+)
+
+
+##fit coxph
+fit1 <- coxph(Surv(time, event)~ 1, data =  surv.yr.priors)
+fit2 <- coxph(Surv(time, event)~ dist.all_scale, data =  surv.yr.priors)
+#fit3 <- coxph(Surv(time, event)~ dist.hum_scale, data =  surv.yr.priors)
+fit4 <- coxph(Surv(time, event)~  clim1_scale + clim2_scale, data =  surv.yr.priors)
+fit5 <- coxph(Surv(time, event)~ dist.all_scale + clim1_scale + clim2_scale, data =  surv.yr.priors)
+fit6 <- coxph(Surv(time, event)~ dist.all_scale + clim1_scale, data =  surv.yr.priors)
+fit7 <- coxph(Surv(time, event)~ clim1_scale, data =  surv.yr.priors)
+#fit8 <- coxph(Surv(time, event)~ dist.hum_scale + clim1_scale, data =  surv.yr.priors)
+
+
+##prep model selection table
+mod.sel <- model.sel(fit1,fit2,fit4,fit5,fit6,fit7, rank="AICc")
+mod.sel
+
+plot(ggpredict(fit5, terms="dist.all_scale",type = "survival"))
+```
+
+
+```{r Gather data inputs in a list, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, results='hide'}
+## Try with binomial and jags at individual level
+## identical results to herd level below, all good, just do one
+
+dist.all_scale.new=seq(-2,2,by=0.1)
+
+ipm_dat.ind <- list(
+  N=nrow(surv.yr.priors),
+  Ntrys=surv.yr.priors$time,
+  Nsucc=surv.yr.priors$event, 
+  dist.all_scale=surv.yr.priors$dist.all_scale,
+  clim1_scale=surv.yr.priors$clim1_scale,
+  clim2_scale=surv.yr.priors$clim2_scale,
+  dist.all_scale.new=dist.all_scale.new,
+  N.new=length(dist.all_scale.new)
+)
+
+mod.ind <-
+"model{ 
+    # likelihood
+    for (i in 1:N){
+            Nsucc[i] ~ dbin(p[i], Ntrys[i])
+            logit(p[i]) <- alpha + beta.dist*dist.all_scale[i] + beta.clim1*clim1_scale[i] + beta.clim2*clim2_scale[i]
+    }
+    # priors
+    alpha ~ dunif(-10,10)
+    beta.dist ~ dunif(-10,10)
+    beta.clim1 ~ dunif(-10,10)
+    beta.clim2 ~ dunif(-10,10)
+    
+    ##predict
+    for(i in 1:N.new){
+    logit(p.new[i]) <- alpha + beta.dist*dist.all_scale.new[i]
+    p.new.annual[i] <-pow(1-p.new[i], 365)
+    }
+
+}"
+
+
+nth <- 1
+nbu <- 500
+nch <- 3
+nad <- 500
+nit <- 3000
+
+out.ind <- jagsUI::jags(ipm_dat.ind, 
+	inits =NULL,
+	parameters.to.save=c("p", "alpha", "beta.dist", "beta.clim1", "beta.clim2", "p.new.annual"),
+	model.file = textConnection(mod.ind),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+
+(1-out.ind$mean$p)^365
+
+out.ind%>%
+  gather_draws(beta.dist,
+               beta.clim1,
+               beta.clim2)%>%
+  median_qi()
+
+out.ind%>%
+  gather_draws(beta.dist,
+               beta.clim1,
+               beta.clim2)%>%
+  ggplot(aes(x=.value,fill=.variable))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+  geom_vline(xintercept = 0, linetype="dashed")
+
+
+tibble(dist=dist.all_scale.new,
+       s=out.ind$mean$p.new,
+       sd=out.ind$sd$p.new)%>%
+  ggplot(aes(x=dist,y=s, ymin=s-sd,ymax=s+sd))+
+  geom_ribbon(alpha=0.5)+
+  geom_line()
+```
+
+
+```{r Gather data inputs in a list2, message=FALSE, warning=FALSE}
+
+
+##data to predict on
+dist.all_scale.new=seq(-2,2,by=0.1)
+
+# ggplot(surv.yr.priors%>%pivot_longer(dist.all_scale:clim2_scale) )+
+#   geom_point(aes(x=value, y=est, color=herd))+
+#   geom_smooth(method = "lm", se = FALSE,aes(x=value, y=est), color="black")+
+#   geom_smooth(method = "loess", se = FALSE,aes(x=value, y=est), color="black", linetype="dashed")+
+#   facet_wrap(vars(name), scales="free_x")+
+#   guides(color="none")+
+#   theme_ipsum() +
+#     theme(
+#     axis.title.x = element_text(size = 15),
+#     axis.title.y = element_text(size = 15))+
+#   labs(x="Value (scaled)", y=("Survival"), title="Annual S across herds, by climate and disturbance")
+# 
+# ggplot(recruit.yr.ipm%>%pivot_longer(dist.all_scale:clim2_scale) )+
+#   geom_point(aes(x=value, y=est, color=herd, shape=as.factor(season.num)))+
+#   geom_smooth(data=recruit.yr.ipm%>%pivot_longer(dist.all_scale:clim2_scale)%>%filter(season.num==9),
+#               method = "lm", se = FALSE,aes(x=value, y=est), color="black")+
+#   geom_smooth(data=recruit.yr.ipm%>%pivot_longer(dist.all_scale:clim2_scale)%>%filter(season.num==9),
+#               method = "loess", se = FALSE,aes(x=value, y=est), color="black", linetype="dashed")+
+#   facet_wrap(vars(name), scales="free_x")+
+#   guides(color="none")+
+#   theme_ipsum() +
+#     theme(
+#     axis.title.x = element_text(size = 15),
+#     axis.title.y = element_text(size = 15))+
+#   labs(x="Value (scaled)", y=("Recruitment"), title="Annual R across herds, by climate and disturbance")
+
+
+ipm_dat.herd <- list(
+  ns=nrow(surv.yr.priors),
+  nr=nrow(recruit.yr.priors),
+  sdat=surv.yr.priors,
+  rdat=recruit.yr.priors,
+  new=length(dist.all_scale.new),
+  dist.all_scale.new=dist.all_scale.new
+)
+
+
+
+mod.herd <-
+"model{ 
+    # priors
+    muS ~ dnorm(logit(1-0.0004369368),10)
+    beta.dist.s ~ dunif(-10,10)
+    beta.clim1.s ~ dunif(-10,10)
+    beta.clim2.s ~ dunif(-10,10)
+    
+    muR ~ dnorm(logit(0.15),10)
+    beta.dist.r ~ dunif(-10,10)
+    beta.clim1.r ~ dunif(-10,10)
+    beta.clim2.r ~ dunif(-10,10)
+    beta.season.r ~ dunif(-10,10)
+        beta.type.otc.r ~ dunif(-10,10)
+            beta.type.osc.r ~ dunif(-10,10)
+                beta.type.mnka.r ~ dunif(-10,10)
+    
+    # likelihood
+    for (i in 1:ns){
+            sdat[i,3] ~ dbin((1-s[i]), sdat[i,4])
+            logit(s[i]) <- muS + beta.dist.s*sdat[i,5] + beta.clim1.s*sdat[i,6] + beta.clim2.s*sdat[i,7]
+    }
+    
+        for (i in 1:nr){
+            rdat[i,3] ~ dbin(r[i], rdat[i,4])
+            logit(r[i]) <- muR + beta.dist.r*rdat[i,5] + beta.clim1.r*rdat[i,6] + beta.clim2.r*rdat[i,7] + beta.season.r*rdat[i,8]+
+            beta.type.otc.r*rdat[i,9] + beta.type.osc.r*rdat[i,10] + beta.type.mnka.r*rdat[i,11]
+            
+    }
+
+    
+    ##predict
+    for(i in 1:new){
+    logit(s.new[i]) <- muS + beta.dist.s*dist.all_scale.new[i]
+    s.new.annual[i] <-pow((s.new[i]), 365)
+    
+    logit(r.new[i]) <- muR + beta.dist.r*dist.all_scale.new[i]  + beta.season.r*9 + beta.type.otc.r
+    }
+
+}"
+
+
+nth <- 50
+nbu <- 3000
+nch <- 3
+nad <- 3000
+nit <- 30000
+
+out.herd <- jagsUI::jags(ipm_dat.herd, 
+	inits =NULL,
+	parameters.to.save=c("s", "muS", "beta.dist.s", "beta.clim1.s", "beta.clim2.s", "s.new.annual",
+	                     "r", "muR", "beta.dist.r", "beta.clim1.r", "beta.clim2.r", "r.new", "beta.season.r"),
+	model.file = textConnection(mod.herd),
+	n.chains = nch,
+	n.cores = nch,
+	n.iter = nit,
+	n.burnin = nbu,
+	n.thin = nth,
+	n.adapt = nad)
+
+
+out.herd$mean$s^365
+
+##distributions
+#mcmcplots::mcmcplot(out.herd$samples, par = c("alpha.r"))
+prior.draws <- out.herd%>%
+  gather_draws(muS, beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	                      muR, beta.dist.r, beta.clim1.r, beta.clim2.r,beta.season.r)%>%
+  mutate(type="Priors")
+
+prior.draws%>%
+  ggplot(aes(x=.value,fill=.variable))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+  geom_vline(xintercept = 0, linetype="dashed")
+
+  write_csv(prior.draws, here::here("tables/prior.draws.csv"))
+##priors
+priors <- out.herd%>%
+  gather_draws(muS, beta.dist.s, beta.clim1.s, beta.clim2.s, 
+	                      muR, beta.dist.r, beta.clim1.r, beta.clim2.r,beta.season.r)%>%
+  group_by(.variable)%>%
+  summarise(mean=mean(.value),
+            sd=sd(.value),
+            tau=(1/(sd^2)))
+write_csv(priors, here::here("data/clean/forIPM/priors.csv"))
+
+##plot
+tibble(dist=c(dist.all_scale.new,dist.all_scale.new),
+       est=c(out.herd$mean$s.new.annual,out.herd$mean$r.new),
+       sd=c(out.herd$sd$s.new.annual,out.herd$sd$r.new),
+       type=rep(c("Survival","Recruitment"), each=length(out.herd$sd$s.new.annual)))%>%
+  ggplot(aes(x=dist,y=est, ymin=est-sd,ymax=est+sd, group=type, fill=type))+
+  geom_ribbon(alpha=0.5)+
+  geom_line()+
+  facet_wrap(vars(type), scales="free")
+
+
+saveRDS(out.herd, file = here::here("jags/output/priors_07_08_2023.rds"))
+```
+
