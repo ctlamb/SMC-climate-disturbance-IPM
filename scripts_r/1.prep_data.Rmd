@@ -561,6 +561,7 @@ write_csv(surv.yr.priors, here::here("data/clean/forIPM/surv.yr.priors.csv"))
 write_csv(surv.yr.ipm, here::here("data/clean/forIPM/surv.yr.ipm.csv"))
 write_csv(recruit.yr.priors, here::here("data/clean/forIPM/recruit.yr.priors.csv"))
 write_csv(recruit.yr.ipm, here::here("data/clean/forIPM/recruit.yr.ipm.csv"))
+write_csv(counts, here::here("data/clean/forIPM/counts.csv"))
 
 ## covariates
 saveRDS(dist.all, here::here("data/clean/forIPM/dist.all.rds"))
