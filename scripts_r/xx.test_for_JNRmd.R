@@ -665,9 +665,81 @@ counts%>%
   geom_point()+
   geom_smooth()
 
+library(sf)
+library(units)
+herd.ranges <- st_read(here::here("data/spatial/herds/ipm_herds.shp"))%>%
+  st_transform(crs=3005)%>%
+  mutate(area=st_area(.)%>%set_units(km^2)%>%as.numeric)
+
+density <- counts%>%
+  left_join(herd.ranges%>%
+              tibble()%>%
+              select(herd,area,ECCC),
+            by="herd")%>%
+  mutate(D=Est_CL/(area/100))
 
 
-# RUN again but without data from the 4 + herds  ---------------------------------------------------------------
+lm(D ~  dist, data=density)%>%summary()
+
+density%>%
+  ggplot(aes(x=dist, y=D))+
+  geom_point()+
+  geom_smooth()
+
+
+density%>%
+  ggplot(aes(x=dist, y=D, group=herd, color=ECCC))+
+  geom_point()+
+  geom_smooth(method="lm",se=FALSE)
+
+
+lm(D ~  dist, data=density)%>%tidy()%>%filter(term=="dist")
+lmer(D ~  dist + (1|herd), data=density)%>%tidy()%>%filter(term=="dist")
+lmer(D ~  dist + (1+dist|herd), data=density)%>%tidy()%>%filter(term=="dist")
+
+dist.herds.glm.d <- density%>%
+  group_by(herd)%>%
+  add_count()%>%
+  filter(n>1)%>%
+  drop_na(D)%>%
+  nest(data = c(-herd))%>% 
+  mutate(
+    fit = map(data, ~ lm(D ~  dist, data = .x)),
+    tidied = map(fit, tidy)
+  )%>%
+  unnest(tidied) %>% 
+  select(-data, -fit)%>%
+  filter(term=="dist")
+
+
+dist.herds.glm.d %>%
+  left_join(dist.long.all%>%
+              group_by(herd)%>%
+              summarise(disturbance=median(dist)),
+            by="herd")%>%
+  ggplot(aes(x=disturbance,y=estimate, ymin=estimate-std.error, ymax=estimate+std.error, label=herd))+
+  geom_point()+
+  geom_linerange()+
+  geom_label()+
+  geom_smooth(method="lm", se=FALSE)
+
+
+dist.herds.glm.d %>%
+  filter(term=="dist",
+         !herd%in%c("Tonquin", "Brazeau", "Graham", "Maligne", "Banff", "Hart South"))%>%
+  left_join(dist.long.all%>%
+              group_by(herd)%>%
+              summarise(disturbance=median(dist)),
+            by="herd")%>%
+  ggplot(aes(x=disturbance,y=estimate, ymin=estimate-std.error, ymax=estimate+std.error, label=herd))+
+  geom_point()+
+  geom_linerange()+
+  geom_label()+
+  geom_smooth(method="lm", se=FALSE)
+
+
+
+# RUN again but without data from the 4 + herds and a few others possibly an issue  ---------------------------------------------------------------
 
 
 ipm_dat4 <- list(
@@ -681,11 +753,11 @@ ipm_dat4 <- list(
   count.osc=count.osc,
   count.mnka=count.mnka,
   
-  nc = nrow(cdat%>%filter(!herd%in%positive.herds$herd)), 
-  ne = nrow(edat%>%filter(!herd%in%positive.herds$herd)),
-  ns = nrow(edat%>%filter(!herd%in%positive.herds$herd)),
-  nr = nrow(rdat%>%filter(!herd%in%positive.herds$herd)),
-  nsr = nrow(srdat%>%filter(!herd%in%positive.herds$herd)),
+  nc = nrow(cdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff"))), 
+  ne = nrow(edat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff"))),
+  ns = nrow(edat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff"))),
+  nr = nrow(rdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff"))),
+  nsr = nrow(srdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff"))),
   
   nsight_grp = nsight_grp,
   sight_grp = hd$sight_grp,
@@ -695,12 +767,12 @@ ipm_dat4 <- list(
   meansr = meansr,
   
   n1 = n1, 
-  cdat = cdat%>%filter(!herd%in%positive.herds$herd),
-  edat = edat%>%filter(!herd%in%positive.herds$herd),
-  sdat = sdat%>%filter(!herd%in%positive.herds$herd),
-  srdat = srdat%>%filter(!herd%in%positive.herds$herd),
-  pdat = pdat%>%filter(!herd%in%positive.herds$herd),
-  rdat = rdat%>%filter(!herd%in%positive.herds$herd),
+  cdat = cdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff")),
+  edat = edat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff")),
+  sdat = sdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff")),
+  srdat = srdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff")),
+  pdat = pdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff")),
+  rdat = rdat%>%filter(!herd%in%c(positive.herds$herd,"Tonquin", "Brazeau", "Graham", "Maligne", "Banff")),
   
   dist = dist.all, 
   clim1 = clim1,
