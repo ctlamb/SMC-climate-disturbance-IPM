@@ -3,6 +3,10 @@
 library(tidybayes)
 library(ggmcmc)
 library(hrbrthemes)
+library(sf)
+library(units)
+library(lme4)
+library(broom.mixed)
 library(tidylog)
 library(tidyverse)
 
@@ -475,10 +479,14 @@ draws3%>%
 # JOSH CAN IGNORE HERE AND BELOW, JUST ME SLEUTHING ---------------------------------------------------------------
 
 ##sex ratio?? vs dist
+  ##maybe an effect? fewer F with more disturbance
 ##pull min counts
-##signal of disturbance has been lost? think about dist->ungulate->wolf cascade, not same everywhere 
+  ## --no effect
 ##expand herd boundary with buffer?
 ## no priors?
+  ## --no effect
+
+##signal of disturbance has been lost? think about dist->ungulate->wolf cascade, not same everywhere 
 ## disturbance data is limited to blocks and fires, dont have full ecological pathway data (preds and apparent prey), Time scale limited (historic wolf control, pre-disturbance data), but with contemporary and available data, we do not find a clear relationship between D~dist but should still try restoration
 # Something is buggered. As soon as I add N data, disturbance is + with S, why? ---------------------------------------------------------------
 lambda <- out$mean$lambda%>%
@@ -540,6 +548,36 @@ ggplot(sdat, aes(x=year, y=(1-(events/trials))^365,group=herd))+
   geom_smooth(method="lm",se=FALSE, alpha=0.2)
 
 
+srdat.dist <- srdat%>%
+  tibble()%>%
+  mutate(herd=as.character(herd),
+         sd=1/sqrt(tau))%>%
+  left_join(dist.long, by=c("herd","year"))
+
+srdat.dist%>%
+  ggplot(aes(x=dist, y=mu, ymin=mu-sd, ymax=mu+sd, group=herd))+
+  geom_point()+
+  geom_linerange()+
+  geom_smooth(method="lm",se=FALSE, alpha=0.2)+
+  labs(x="Disturbance (standardized)", y="Sex ratio (proportion females)")
+
+srdat.dist%>%
+  ggplot(aes(x=year, y=mu, ymin=mu-sd, ymax=mu+sd, group=herd))+
+  geom_point()+
+  geom_linerange()+
+  geom_smooth(method="lm",se=FALSE, alpha=0.2)+
+  labs(x="Year", y="Sex ratio (proportion females)")
+
+srdat.dist%>%
+  lm(mu~dist, data=.)%>%
+  tidy
+
+
+srdat.dist%>%
+  lmer(mu~dist + (1|herd), data=.)%>%
+  tidy
+  
+
 # Look at raw data and IPM data without climate and disturbance as covariates (from treatment effects paper we submitted) ---------------------------------------------------------------
 dist.long.all <- dist.long%>%
   rename(herd_num=herd,
@@ -553,7 +591,7 @@ dist.long.all%>%
   geom_path()+
   facet_wrap(vars(herd))
 
-counts <- read_csv(here::here("data/clean/counts.csv"))%>%
+counts <- read_csv(here::here("data/clean/forIPM/counts.csv"))%>%
   left_join(dist.long.all, by=c("herd","year"))
 
 
@@ -569,6 +607,18 @@ counts%>%
   geom_smooth(method="lm", se=FALSE)
 
 counts%>%
+  filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau"))%>%
+  ggplot(aes(x=dist* 0.1850259 + 0.2669821,y=Est_CL, color=herd))+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE)
+
+counts%>%
+  filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau","Graham"))%>%
+  ggplot(aes(x=dist* 0.1850259 + 0.2669821,y=Est_CL, color=herd))+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE)
+
+counts%>%
   filter(!herd%in%c("Itcha-Ilgachuz","Graham"))%>%
   ggplot(aes(x=year,y=Est_CL, color=herd))+
   geom_point()+
@@ -580,7 +630,7 @@ counts%>%
   geom_smooth(method="lm")+
   facet_wrap(vars(herd), scales="free_y")
 
-library(broom)
+
 dist.herds.glm <- counts%>%
   group_by(herd)%>%
   add_count()%>%
@@ -626,8 +676,7 @@ dist.herds.glm%>%
   geom_smooth(method="lm", se=FALSE)
 
 
-library(lme4)
-library(broom.mixed)
+
 glmm <- lmer(Est_CL~dist + (1+ dist|herd), data=counts%>%group_by(herd)%>%add_count()%>%filter(n>3))
   
 glmm.result <- glmm%>%
@@ -678,8 +727,7 @@ counts%>%
   geom_point()+
   geom_smooth()
 
-library(sf)
-library(units)
+
 herd.ranges <- st_read(here::here("data/spatial/herds/ipm_herds.shp"))%>%
   st_transform(crs=3005)%>%
   mutate(area=st_area(.)%>%set_units(km^2)%>%as.numeric)
@@ -711,9 +759,59 @@ density%>%
   geom_smooth(method="lm",se=FALSE)
 
 
+density%>%
+  filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau"))%>%
+  ggplot(aes(x=dist* 0.1850259 + 0.2669821,y=D, color=herd))+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE)
+
+density%>%
+  filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau","Graham"))%>%
+  ggplot(aes(x=dist* 0.1850259 + 0.2669821,y=D, color=herd))+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE)
+density%>%
+  ggplot(aes(x=dist* 0.1850259 + 0.2669821,y=D, color=herd))+
+  geom_point()+
+  geom_smooth(method="lm", se=FALSE)
+
+
+  ggplot()+
+  geom_smooth(data= density, aes(x=dist* 0.1850259 + 0.2669821,y=D, color=herd),method="lm", se=FALSE)+
+  geom_smooth(data=density,aes(x=dist* 0.1850259 + 0.2669821,y=D),
+              method = "gam", formula = y ~ s(x, k = 5))+
+  guides(color="none")
+  
+  ggplot()+
+    geom_smooth(data= density%>%
+                  filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau","Graham")),
+                aes(x=dist* 0.1850259 + 0.2669821,y=D, color=herd),method="lm", se=FALSE)+
+    geom_smooth(data=density%>%
+                  filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau","Graham")),
+                aes(x=dist* 0.1850259 + 0.2669821,y=D),
+                method = "gam", formula = y ~ s(x, k = 5))+
+    guides(color="none")
+
+
 lm(D ~  dist, data=density)%>%tidy()%>%filter(term=="dist")
 lmer(D ~  dist + (1|herd), data=density)%>%tidy()%>%filter(term=="dist")
-lmer(D ~  dist + (1+dist|herd), data=density)%>%tidy()%>%filter(term=="dist")
+mod.dist <-lmer(D ~  dist + I(dist^2) + (1+dist|herd) + (1|ECCC), data=density%>%group_by(herd)%>%filter(n()>3)%>%
+                  filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau","Graham"))%>%mutate(dist=dist* 0.1850259 + 0.2669821))
+mod.yr <-lmer(D ~  year + (1+year|herd) + (1|ECCC), data=density%>%group_by(herd)%>%filter(n()>3)%>%
+                filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau","Graham"))%>%mutate(year=year/1000))
+mod.yr2 <-lmer(D ~  year + I(year^2) + (1+year|herd) + (1|ECCC), data=density%>%group_by(herd)%>%filter(n()>3)%>%
+                filter(!herd%in%c("Itcha-Ilgachuz","Banff","Tonquin", "Maligne","Brazeau","Graham"))%>%mutate(year=year/1000))
+
+cor(density$year, density$dist)
+library(MuMIn)
+model.sel(mod.dist, mod.yr, mod.yr2)
+
+library(ggeffects)
+plot(ggpredict(mod.yr2,terms="year [all]"))
+plot(ggpredict(mod.dist,terms="dist [all]"))
+
+
+model.sel(lm(D ~  dist + I(dist^2), data=density), lm(D ~  year + I(year^2), data=density))
 
 dist.herds.glm.d <- density%>%
   group_by(herd)%>%
@@ -754,6 +852,33 @@ dist.herds.glm.d %>%
   geom_linerange()+
   geom_label()+
   geom_smooth(method="lm", se=FALSE)
+
+dist.herds.glm.d %>%
+  filter(term=="dist",
+         !herd%in%c("Tonquin", "Brazeau", "Graham", "Maligne", "Banff", "Hart South"))%>%
+  left_join(dist.long.all%>%
+              group_by(herd)%>%
+              summarise(disturbance=median(dist)),
+            by="herd")%>%
+  ggplot(aes(x=disturbance,y=estimate, ymin=estimate-std.error, ymax=estimate+std.error, label=herd))+
+  geom_point()+
+  geom_linerange()+
+  geom_label()+
+  geom_smooth(se=FALSE)
+
+dist.herds.glm.d %>%
+  filter(term=="dist",
+         !herd%in%c("Tonquin", "Brazeau", "Graham", "Maligne", "Banff", "Hart South"))%>%
+  left_join(dist.long.all%>%
+              group_by(herd)%>%
+              summarise(disturbance=median(dist)),
+            by="herd")%>%
+  ggplot(aes(x=disturbance* 0.1850259 + 0.2669821,y=estimate, ymin=estimate-std.error, ymax=estimate+std.error, label=herd))+
+  geom_point()+
+  geom_linerange()+
+  geom_label()+
+  geom_smooth()
+
 
 
 
@@ -837,6 +962,100 @@ draws4 <- out4%>%
 
 
 draws4%>%
+  filter(!.variable%in%c("beta.season.r","muS","muR"))%>%
+  group_by(type,.variable)%>%
+  summarise(mean=mean(.value),
+            sd=sd(.value))%>%
+  ggplot(aes(x=mean, xmin=mean-sd, xmax=mean+sd, y=.variable, color=type))+
+  geom_point(alpha=0.5, position=position_dodge(0.4))+
+  geom_linerange(alpha=0.5, position=position_dodge(0.4))+
+  geom_vline(xintercept = 0, linetype="dashed")
+
+
+
+
+
+
+# RUN again but without priors and no min counts  ---------------------------------------------------------------
+
+
+ipm_dat5 <- list(
+  nherd = nherd,
+  nyr = nyr,
+  first = first,
+  last=last$yrs,
+  
+  month_offset = month_offset,
+  count.otc=count.otc,
+  count.osc=count.osc,
+  count.mnka=count.mnka,
+  
+  nc = nrow(cdat), 
+  ne = nrow(edat%>%slice(1)),
+  ns = nrow(edat),
+  nr = nrow(rdat),
+  nsr = nrow(srdat),
+  
+  nsight_grp = nsight_grp,
+  sight_grp = hd$sight_grp,
+  
+  mean_grp_p = mean_grp_p,
+  mean_grp_ptau = mean_grp_ptau,
+  meansr = meansr,
+  
+  n1 = n1, 
+  cdat = cdat,
+  edat = edat%>%slice(1),
+  sdat = sdat,
+  srdat = srdat,
+  pdat = pdat,
+  rdat = rdat,
+  
+  dist = dist.all, 
+  clim1 = clim1,
+  clim2= clim2,
+  
+  prior.dist.s.mean=0,
+  prior.dist.s.tau=0.0001,
+  prior.clim1.s.mean=0,
+  prior.clim1.s.tau=0.0001,
+  prior.clim2.s.mean=0,
+  prior.clim2.s.tau=0.0001,
+  
+  prior.dist.r.mean=0,
+  prior.dist.r.tau=0.0001,
+  prior.clim1.r.mean=0,
+  prior.clim1.r.tau=0.0001,
+  prior.clim2.r.mean=0,
+  prior.clim2.r.tau=0.0001
+)
+
+nth <- 50
+nbu <- 2000 
+nch <- 3
+nad <- 2000
+nit <- 30000 
+
+out5 <- jagsUI::jags(ipm_dat5, 
+                     inits = ipm_inits,
+                     model_parms,
+                     model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+                     n.chains = nch,
+                     n.cores = nch,
+                     n.iter = nit,
+                     n.burnin = nbu,
+                     n.thin = nth,
+                     n.adapt = nad)
+
+
+draws5 <- out5%>%
+  gather_draws(muS,beta.dist.s, beta.clim1.s, beta.clim2.s, 
+               muR,beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  mutate(type="Posteriors-no +ve herds")%>%
+  rbind(draws4)
+
+
+draws5%>%
   filter(!.variable%in%c("beta.season.r","muS","muR"))%>%
   group_by(type,.variable)%>%
   summarise(mean=mean(.value),

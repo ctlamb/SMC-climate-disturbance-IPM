@@ -22,8 +22,10 @@ sexratio_summary <- read.csv(here::here("data/clean/sexratio_summary.csv"))
 
 ##covariates
 dist.all <- readRDS(here::here("data/clean/forIPM/dist.all.rds"))
-clim1 <- readRDS(here::here("data/clean/forIPM/clim1.rds"))
-clim2 <- readRDS(here::here("data/clean/forIPM/clim2.rds"))
+###hack for now
+dist.all[,1:33] <-dist.all[,34]
+snow.depth <- readRDS(here::here("data/clean/forIPM/snow.depth.rds"))
+grow.seas.length <- readRDS(here::here("data/clean/forIPM/grow.seas.length.rds"))
 
 ##other
 #first_per_herd <- read_csv(here::here("data/clean/forIPM/first_per_herd.csv"))
@@ -44,8 +46,8 @@ ipm.prior.dat <- list(
   sdat=sdat,
   rdat=rdat,
   dist = dist.all, 
-  clim1 = clim1,
-  clim2= clim2
+  snow.depth = snow.depth,
+  grow.seas.length= grow.seas.length
 )
 
 
@@ -55,13 +57,13 @@ prior.mod <-
     # priors
     muS ~ dnorm(logit(0.9995),10)
     beta.dist.s ~ dunif(-10,10)
-    beta.clim1.s ~ dunif(-10,10)
-    beta.clim2.s ~ dunif(-10,10)
+    beta.snow.depth.s ~ dunif(-10,10)
+    beta.grow.seas.length.s ~ dunif(-10,10)
     
     muR ~ dnorm(logit(0.15),10)
     beta.dist.r ~ dunif(-10,10)
-    beta.clim1.r ~ dunif(-10,10)
-    beta.clim2.r ~ dunif(-10,10)
+    beta.snow.depth.r ~ dunif(-10,10)
+    beta.grow.seas.length.r ~ dunif(-10,10)
     beta.season.r ~ dunif(-10,10)
     beta.type.otc.r ~ dunif(-10,10)
     beta.type.osc.r ~ dunif(-10,10)
@@ -71,13 +73,13 @@ prior.mod <-
     for (i in 1:ns){
             sdat[i,3] ~ dbin((1-s[i]), sdat[i,4])
             logit(s[i]) <- muS + 
-            beta.dist.s*dist[sdat[i,1],sdat[i,2]] + beta.clim1.s*clim1[sdat[i,1],sdat[i,2]] + beta.clim2.s*clim2[sdat[i,1],sdat[i,2]]
+            beta.dist.s*dist[sdat[i,1],sdat[i,2]] + beta.snow.depth.s*snow.depth[sdat[i,1],sdat[i,2]] + beta.grow.seas.length.s*grow.seas.length[sdat[i,1],sdat[i,2]]
     }
     
         for (i in 1:nr){
             rdat[i,3] ~ dbin(r[i], rdat[i,4])
             logit(r[i]) <- muR + 
-            beta.dist.r*dist[rdat[i,1],rdat[i,2]] + beta.clim1.r*clim1[rdat[i,1],rdat[i,2]] + beta.clim2.r*clim2[rdat[i,1],rdat[i,2]] +
+            beta.dist.r*dist[rdat[i,1],rdat[i,2]] + beta.snow.depth.r*snow.depth[rdat[i,1],rdat[i,2]] + beta.grow.seas.length.r*grow.seas.length[rdat[i,1],rdat[i,2]] +
             beta.season.r*rdat[i,5]+
             beta.type.otc.r*rdat[i,6] + beta.type.osc.r*rdat[i,7] + beta.type.mnka.r*rdat[i,8]
             
@@ -94,8 +96,8 @@ nit <- 50000
 
 out.priors <- jagsUI::jags(ipm.prior.dat, 
                          inits =NULL,
-                         parameters.to.save=c("s", "muS", "beta.dist.s", "beta.clim1.s", "beta.clim2.s", 
-                                              "r", "muR", "beta.dist.r", "beta.clim1.r", "beta.clim2.r",  "beta.season.r"),
+                         parameters.to.save=c("s", "muS", "beta.dist.s", "beta.snow.depth.s", "beta.grow.seas.length.s", 
+                                              "r", "muR", "beta.dist.r", "beta.snow.depth.r", "beta.grow.seas.length.r",  "beta.season.r"),
                          model.file = textConnection(prior.mod),
                          n.chains = nch,
                          n.cores = nch,
@@ -104,13 +106,13 @@ out.priors <- jagsUI::jags(ipm.prior.dat,
                          n.thin = nth,
                          n.adapt = nad)
 
-# mcmcplots::mcmcplot(out.priors$samples, par = c("muR", "beta.clim1.r","beta.clim2.r","beta.dist.r",
-#                                          "muS", "beta.clim1.s","beta.clim2.s", "beta.dist.s"))
+# mcmcplots::mcmcplot(out.priors$samples, par = c("muR", "beta.snow.depth.r","beta.grow.seas.length.r","beta.dist.r",
+#                                          "muS", "beta.snow.depth.s","beta.grow.seas.length.s", "beta.dist.s"))
                                          
 
 priors <- out.priors%>%
-  gather_draws(muS, beta.dist.s, beta.clim1.s, beta.clim2.s, 
-               muR, beta.dist.r, beta.clim1.r, beta.clim2.r,beta.season.r)%>%
+  gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.grow.seas.length.s, 
+               muR, beta.dist.r, beta.snow.depth.r, beta.grow.seas.length.r,beta.season.r)%>%
   group_by(.variable)%>%
   summarise(mean=mean(.value),
             sd=sd(.value),
@@ -187,22 +189,22 @@ ipm_dat <- list(
   rdat = rdat,
   
   dist = dist.all, 
-  clim1 = clim1,
-  clim2= clim2,
+  snow.depth = snow.depth,
+  grow.seas.length= grow.seas.length,
   
   prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
   prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
-  prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
-  prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
-  prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
-  prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+  prior.snow.depth.s.mean=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(mean),
+  prior.snow.depth.s.tau=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(tau),
+  prior.grow.seas.length.s.mean=priors%>%filter(.variable=="beta.grow.seas.length.s")%>%pull(mean),
+  prior.grow.seas.length.s.tau=priors%>%filter(.variable=="beta.grow.seas.length.s")%>%pull(tau),
   
   prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
   prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
-  prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
-  prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
-  prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
-  prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+  prior.snow.depth.r.mean=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(mean),
+  prior.snow.depth.r.tau=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(tau),
+  prior.grow.seas.length.r.mean=priors%>%filter(.variable=="beta.grow.seas.length.r")%>%pull(mean),
+  prior.grow.seas.length.r.tau=priors%>%filter(.variable=="beta.grow.seas.length.r")%>%pull(tau)
 )
 
 
@@ -236,11 +238,11 @@ model_parms <- c(
   
   "offset",
   "beta.dist.s",
-  "beta.clim1.s",
-  "beta.clim2.s",
+  "beta.snow.depth.s",
+  "beta.grow.seas.length.s",
   "beta.dist.r",
-  "beta.clim1.r",
-  "beta.clim2.r"
+  "beta.snow.depth.r",
+  "beta.grow.seas.length.r"
 )
 
 
@@ -264,12 +266,12 @@ out <- jagsUI::jags(ipm_dat,
 
 
 draws <- out%>%
-  gather_draws(muS, beta.dist.s, beta.clim1.s, beta.clim2.s, 
-               muR, beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.grow.seas.length.s, 
+               muR, beta.dist.r, beta.snow.depth.r, beta.grow.seas.length.r)%>%
   mutate(type="Posteriors")%>%
   rbind(out.priors%>%
-          gather_draws(muS, beta.dist.s, beta.clim1.s, beta.clim2.s, 
-                       muR, beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+          gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.grow.seas.length.s, 
+                       muR, beta.dist.r, beta.snow.depth.r, beta.grow.seas.length.r)%>%
           mutate(type="Priors"))
 
 draws%>%
@@ -313,22 +315,22 @@ ipm_dat2 <- list(
   rdat = rdat,
   
   dist = dist.all, 
-  clim1 = clim1,
-  clim2= clim2,
+  snow.depth = snow.depth,
+  grow.seas.length= grow.seas.length,
   
   prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
   prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
-  prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
-  prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
-  prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
-  prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+  prior.snow.depth.s.mean=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(mean),
+  prior.snow.depth.s.tau=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(tau),
+  prior.grow.seas.length.s.mean=priors%>%filter(.variable=="beta.grow.seas.length.s")%>%pull(mean),
+  prior.grow.seas.length.s.tau=priors%>%filter(.variable=="beta.grow.seas.length.s")%>%pull(tau),
   
   prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
   prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
-  prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
-  prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
-  prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
-  prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+  prior.snow.depth.r.mean=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(mean),
+  prior.snow.depth.r.tau=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(tau),
+  prior.grow.seas.length.r.mean=priors%>%filter(.variable=="beta.grow.seas.length.r")%>%pull(mean),
+  prior.grow.seas.length.r.tau=priors%>%filter(.variable=="beta.grow.seas.length.r")%>%pull(tau)
 )
 
 nth <- 50
@@ -350,8 +352,8 @@ out2 <- jagsUI::jags(ipm_dat2,
 
 
 draws2 <- out2%>%
-  gather_draws(muS,beta.dist.s, beta.clim1.s, beta.clim2.s, 
-               muR,beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  gather_draws(muS,beta.dist.s, beta.snow.depth.s, beta.grow.seas.length.s, 
+               muR,beta.dist.r, beta.snow.depth.r, beta.grow.seas.length.r)%>%
   mutate(type="Posteriors-S+R")%>%
   rbind(draws)
 
@@ -413,22 +415,22 @@ ipm_dat3 <- list(
   rdat = rdat%>%left_join(last, by="herd")%>%filter(year<=yrs),
   
   dist = dist.all, 
-  clim1 = clim1,
-  clim2= clim2,
+  snow.depth = snow.depth,
+  grow.seas.length= grow.seas.length,
   
   prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
   prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
-  prior.clim1.s.mean=priors%>%filter(.variable=="beta.clim1.s")%>%pull(mean),
-  prior.clim1.s.tau=priors%>%filter(.variable=="beta.clim1.s")%>%pull(tau),
-  prior.clim2.s.mean=priors%>%filter(.variable=="beta.clim2.s")%>%pull(mean),
-  prior.clim2.s.tau=priors%>%filter(.variable=="beta.clim2.s")%>%pull(tau),
+  prior.snow.depth.s.mean=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(mean),
+  prior.snow.depth.s.tau=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(tau),
+  prior.grow.seas.length.s.mean=priors%>%filter(.variable=="beta.grow.seas.length.s")%>%pull(mean),
+  prior.grow.seas.length.s.tau=priors%>%filter(.variable=="beta.grow.seas.length.s")%>%pull(tau),
   
   prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
   prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
-  prior.clim1.r.mean=priors%>%filter(.variable=="beta.clim1.r")%>%pull(mean),
-  prior.clim1.r.tau=priors%>%filter(.variable=="beta.clim1.r")%>%pull(tau),
-  prior.clim2.r.mean=priors%>%filter(.variable=="beta.clim2.r")%>%pull(mean),
-  prior.clim2.r.tau=priors%>%filter(.variable=="beta.clim2.r")%>%pull(tau)
+  prior.snow.depth.r.mean=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(mean),
+  prior.snow.depth.r.tau=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(tau),
+  prior.grow.seas.length.r.mean=priors%>%filter(.variable=="beta.grow.seas.length.r")%>%pull(mean),
+  prior.grow.seas.length.r.tau=priors%>%filter(.variable=="beta.grow.seas.length.r")%>%pull(tau)
 )
 
 nth <- 50
@@ -451,8 +453,8 @@ out3 <- jagsUI::jags(ipm_dat3,
 #saveRDS(out5, file = here::here("jags/output/dist_clim_tests_nosmall.rds"))
 
 draws3 <- out3%>%
-  gather_draws(muS,beta.dist.s, beta.clim1.s, beta.clim2.s, 
-               muR,beta.dist.r, beta.clim1.r, beta.clim2.r)%>%
+  gather_draws(muS,beta.dist.s, beta.snow.depth.s, beta.grow.seas.length.s, 
+               muR,beta.dist.r, beta.snow.depth.r, beta.grow.seas.length.r)%>%
   mutate(type="Posteriors-nosmall")%>%
   rbind(draws2)
 
@@ -466,3 +468,4 @@ draws3%>%
   geom_point(alpha=0.5, position=position_dodge(0.4))+
   geom_linerange(alpha=0.5, position=position_dodge(0.4))+
   geom_vline(xintercept = 0, linetype="dashed")
+

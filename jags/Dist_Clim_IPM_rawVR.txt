@@ -21,21 +21,21 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 # LP priors
 ##uninformative
 	#beta.dist.s  ~ dunif(-10,10)
-	#beta.clim1.s ~ dunif(-10,10)
-	#beta.clim2.s ~ dunif(-10,10)
+	#beta.snow.depth.s ~ dunif(-10,10)
+	#beta.grow.seas.length.s ~ dunif(-10,10)
 
 	#beta.dist.r ~ dunif(-10,10)
-  #beta.clim1.r ~ dunif(-10,10)
-  #beta.clim2.r ~ dunif(-10,10)
+  #beta.snow.depth.r ~ dunif(-10,10)
+  #beta.grow.seas.length.r ~ dunif(-10,10)
   
 ##informative
   beta.dist.s  ~ dnorm(prior.dist.s.mean, prior.dist.s.tau)
-	beta.clim1.s ~ dnorm(prior.clim1.s.mean, prior.clim1.s.tau)
-	beta.clim2.s ~ dnorm(prior.clim2.s.mean, prior.clim2.s.tau)
+	beta.snow.depth.s ~ dnorm(prior.snow.depth.s.mean, prior.snow.depth.s.tau)
+	beta.grow.seas.length.s ~ dnorm(prior.grow.seas.length.s.mean, prior.grow.seas.length.s.tau)
 
   beta.dist.r  ~ dnorm(prior.dist.r.mean, prior.dist.r.tau)
-	beta.clim1.r ~ dnorm(prior.clim1.r.mean, prior.clim1.r.tau)
-	beta.clim2.r ~ dnorm(prior.clim2.r.mean, prior.clim2.r.tau)
+	beta.snow.depth.r ~ dnorm(prior.snow.depth.r.mean, prior.snow.depth.r.tau)
+	beta.grow.seas.length.r ~ dnorm(prior.grow.seas.length.r.mean, prior.grow.seas.length.r.tau)
 
 	
 # Linear predictors for survival and recruitment
@@ -44,14 +44,14 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 			
 			logit(s.daily[h,yr]) <- muS + # intercept (baseline survival)
 				beta.dist.s*dist[h,yr]+
-								beta.clim1.s*clim1[h,yr] + 
-												beta.clim2.s*clim2[h,yr]
+								beta.snow.depth.s*snow.depth[h,yr] + 
+												beta.grow.seas.length.s*grow.seas.length[h,yr]
 				
 			logit(R[h,yr]) <- muR + # intercept (baseline recruitment) 
 				offset*month_offset[h,yr]  +
 				beta.dist.r*dist[h,yr]+
-								beta.clim1.r*clim1[h,yr] + 
-												beta.clim2.r*clim2[h,yr]+
+								beta.snow.depth.r*snow.depth[h,yr] + 
+												beta.grow.seas.length.r*grow.seas.length[h,yr]+
 												    beta.type.otc.r*count.otc[h,yr] + 
 												        beta.type.osc.r*count.osc[h,yr] + 
 												            beta.type.mnka.r*count.mnka[h,yr]
