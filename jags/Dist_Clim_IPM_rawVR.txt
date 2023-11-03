@@ -3,7 +3,7 @@ model{
 ###R survey timing or count type not in here yet
 
 #  Overall informative intercepts for survival and recreuitment
-	meanS <- logit(0.85)
+	meanS <- logit(0.9995)
 	muS ~ dnorm(meanS, 100)
 	meanR <- logit(0.15)
 	muR ~ dnorm(meanR, 100)
@@ -22,20 +22,24 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 ##uninformative
 	#beta.dist.s  ~ dunif(-10,10)
 	#beta.snow.depth.s ~ dunif(-10,10)
-	#beta.grow.seas.length.s ~ dunif(-10,10)
+	#beta.start.spring.s ~ dunif(-10,10)
 
 	#beta.dist.r ~ dunif(-10,10)
   #beta.snow.depth.r ~ dunif(-10,10)
-  #beta.grow.seas.length.r ~ dunif(-10,10)
+  #beta.start.spring.r ~ dunif(-10,10)
   
 ##informative
   beta.dist.s  ~ dnorm(prior.dist.s.mean, prior.dist.s.tau)
 	beta.snow.depth.s ~ dnorm(prior.snow.depth.s.mean, prior.snow.depth.s.tau)
-	beta.grow.seas.length.s ~ dnorm(prior.grow.seas.length.s.mean, prior.grow.seas.length.s.tau)
+	beta.start.spring.s ~ dnorm(prior.start.spring.s.mean, prior.start.spring.s.tau)
+	beta.warm.dry.summer.s ~ dnorm(prior.warm.dry.summer.s.mean, prior.warm.dry.summer.s.tau)
+	beta.rain.on.snow.s ~ dnorm(prior.rain.on.snow.s.mean, prior.rain.on.snow.s.tau)
 
   beta.dist.r  ~ dnorm(prior.dist.r.mean, prior.dist.r.tau)
 	beta.snow.depth.r ~ dnorm(prior.snow.depth.r.mean, prior.snow.depth.r.tau)
-	beta.grow.seas.length.r ~ dnorm(prior.grow.seas.length.r.mean, prior.grow.seas.length.r.tau)
+	beta.start.spring.r ~ dnorm(prior.start.spring.r.mean, prior.start.spring.r.tau)
+	beta.warm.dry.summer.r ~ dnorm(prior.warm.dry.summer.r.mean, prior.warm.dry.summer.r.tau)
+	beta.rain.on.snow.r ~ dnorm(prior.rain.on.snow.r.mean, prior.rain.on.snow.r.tau)
 
 	
 # Linear predictors for survival and recruitment
@@ -45,13 +49,17 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 			logit(s.daily[h,yr]) <- muS + # intercept (baseline survival)
 				beta.dist.s*dist[h,yr]+
 								beta.snow.depth.s*snow.depth[h,yr] + 
-												beta.grow.seas.length.s*grow.seas.length[h,yr]
+												beta.start.spring.s*start.spring[h,yr]+
+												    beta.warm.dry.summer.s*warm.dry.summer[h,yr]+
+												        beta.rain.on.snow.s*rain.on.snow[h,yr]
 				
 			logit(R[h,yr]) <- muR + # intercept (baseline recruitment) 
 				offset*month_offset[h,yr]  +
 				beta.dist.r*dist[h,yr]+
 								beta.snow.depth.r*snow.depth[h,yr] + 
-												beta.grow.seas.length.r*grow.seas.length[h,yr]+
+												beta.start.spring.r*start.spring[h,yr]+
+												    beta.warm.dry.summer.r*warm.dry.summer[h,yr]+
+												        beta.rain.on.snow.r*rain.on.snow[h,yr]+
 												    beta.type.otc.r*count.otc[h,yr] + 
 												        beta.type.osc.r*count.osc[h,yr] + 
 												            beta.type.mnka.r*count.mnka[h,yr]
@@ -177,6 +185,7 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 
 	#  Survival Observations 
 	# sdat contains event==deaths, and trials=days monitored, so outcome is daily mortality (I.e. 1-daily survival)
+	# here we want s.daily to be in terms of daily survival, so we get sdat(mortality) using 1-daily s
 	for(i in 1:ns){
 		sdat[i,3] ~ dbin((1-s.daily[sdat[i,1], sdat[i,2]]), sdat[i,4])
 		#s.daily[h,yr]

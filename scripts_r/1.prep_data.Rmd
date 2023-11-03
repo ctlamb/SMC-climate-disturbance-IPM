@@ -1,5 +1,5 @@
 ---
-title: "prep data"
+title: "Prep data for IPM"
 author: "Clayton T. Lamb"
 date: '`r format(Sys.time(), "%d %B, %Y")`'
 output: github_document
@@ -54,22 +54,33 @@ surv.yr <- read_csv(here::here("data/clean/survival_yrly.csv"))%>%
   arrange(herd) %>%
   left_join(hn, by = "herd")
 
-covariates <- read.csv(here::here("data/spatial/covariates_addPCA.csv")) %>%
+covariates <- read.csv(here::here("data/spatial/covariates_simplified.csv")) %>%
   mutate(herd = case_when(
     herd == "Bearhole Redwillow" ~ "Narraway BC",
     TRUE ~ herd
   )) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd") %>%
-  drop_na()
+  left_join(hn, by = "herd")
 
-# ##remove Jasper?
-##get covar, S, and R, timing all figured out
+
 ```
 
+## Line up years so that it all affects animals by March year X count. So summer and spring need to be X+1
+```{r filter recovery actions, results='hide', message=FALSE, warning=FALSE}
+
+covar.names <- covariates%>%select(-herd,-year,-herd_num)%>%colnames ##remove herd and year
+
+covar.names_scaled <- paste0(covar.names,"_scale")
+
+covariates <- covariates%>%
+  pivot_longer(covar.names)%>%
+  mutate(year=case_when(name%in%c("snow.depth","cooler.winter","rain.on.snow")~year,
+                   TRUE~year+1))%>%
+  pivot_wider()
+```
+  
 ## Restrict data to only years of demographic data not affected by recovery actions, and
 ## Restrict data to only years of covariate data
-
 ```{r filter recovery actions, results='hide', message=FALSE, warning=FALSE}
 #### TREATMENT COMBOS
 treatment.combos <- trt %>%
@@ -84,10 +95,10 @@ treatment.combos <- trt %>%
   ) %>%
   dplyr::select(herd, year, trt)
 
-yrs_keep <- 1985:2020 ## satellite data starts in 1894 and demographic effects realized following March.
+yrs_keep <- 1970:2020
 
 remove.trts <- treatment.combos %>%
-  #filter(trt != "transplant") %>% ## this was coded as years following the transplant and it had no effect, so retain
+  filter(trt != "transplant") %>% ## this was coded as years following the transplant and it had no effect, so retain
   distinct(trt) %>%
   pull(trt)
 
@@ -163,12 +174,9 @@ recruit.yr <- recruit.yr%>%
   )%>%
   filter(year%in%yrs_keep)
 
-covariates <- covariates %>%
-  filter(year %in% (min(yrs_keep)-1):max(yrs_keep)) ##covariates at y-1 should impact demography at year y (maybe or perhaps need even greater lag)x
 ```
 
 ## Prep data for IPM
-
 ```{r Prep data for IPM, results='hide', message=FALSE, warning=FALSE}
 # Herds and herd number
 herds <- unique(hd$herd)
@@ -176,7 +184,7 @@ nherd <- nrow(hn)
 nsight_grp <- length(unique(hd$sight_grp))
 
 #  Years of study
-yrs <- seq(from = min(counts$year), to = max(counts$year), by = 1)
+yrs <- seq(from = min(yrs_keep), to = max(yrs_keep), by = 1)
 nyr <- length(yrs)
 yr_idx <- seq(from = 1, to = nyr, by = 1)
 yr_df <- as.data.frame(cbind(yrs, yr_idx))
@@ -192,31 +200,51 @@ ntrt <- length(unique(trt$treatment))
 
 
 ## Covariates
+##identify covariates to use
+# covar.names <-c("dist.hum",
+#                 "dist.hum.es",
+#                 "dist.all",
+#                 "grow.seas.length",
+#                 "snow.depth",
+#                 "cooler.winter",
+#                 "warm.dry.summer",
+#                 "start.spring",
+#                 "ros",
+#                 "ndvi"
+#                 )
+
+
 ## scale all covariates
 covariates <- covariates %>%
-  mutate(across(dist.all:clim2,
+  mutate(across(covar.names,
          .fns=~scale(.x, center=TRUE)%>%as.numeric(),
          .names="{col}_scale")) %>%
-  mutate(year = year + 1) %>%
+  mutate(year = year) %>%
   left_join(yr_df, by = c("year" = "yrs"))
 
-dist.all <- covariates %>%
-  select(herd_num, yr_idx, dist.all_scale) %>%
+
+##prep covar vectors
+for(i in 1:length(covar.names)){
+
+temp.vect <- covariates %>%
+  filter(year %in% yrs_keep)%>%
+  select(herd_num, yr_idx, !!covar.names_scaled[i]) %>%
   arrange(herd_num, yr_idx) %>%
-  pivot_wider(names_from = yr_idx, values_from = dist.all_scale, values_fill = NA) %>%
+  pivot_wider(names_from = yr_idx, values_from = !!covar.names_scaled[i], values_fill = NA) %>%
   select(-herd_num)
 
-clim1 <- covariates %>%
-  select(herd_num, yr_idx, clim1_scale) %>%
-  arrange(herd_num, yr_idx) %>%
-  pivot_wider(names_from = yr_idx, values_from = clim1_scale, values_fill = NA) %>%
-  select(-herd_num)
+assign(covar.names[i], temp.vect, env=.GlobalEnv)
+saveRDS(temp.vect, here::here("data/clean/forIPM/", paste0(covar.names[i],".rds")))
 
-clim2 <- covariates %>%
-  select(herd_num, yr_idx, clim2_scale) %>%
-  arrange(herd_num, yr_idx) %>%
-  pivot_wider(names_from = yr_idx, values_from = clim2_scale, values_fill = NA) %>%
-  select(-herd_num)
+rm(temp.name)
+rm(temp.vect)
+}
+
+
+
+
+
+
 
 ## Recruitment
  recruit.yr.priors <- recruit.yr%>%
@@ -237,9 +265,9 @@ clim2 <- covariates %>%
                   type.mnka=case_when(type=="MNKA"~1, TRUE~0),
          adults=case_when(adults==0~1, TRUE~adults))%>%
      left_join(yr_df, by = c("year" = "yrs"))%>%
-   left_join(covariates%>%select(herd,year,dist.all_scale,clim1_scale,clim2_scale), by=c("herd", "year"))%>%
+   left_join(covariates%>%select(herd,year,!!covar.names_scaled), by=c("herd", "year"))%>%
    ungroup%>%
-  select(herd=herd_num,year=yr_idx,events=calves,trials=adults,dist.all_scale,clim1_scale,clim2_scale,season.num,type.otc:type.mnka)
+  select(herd=herd_num,year=yr_idx,events=calves,trials=adults,!!covar.names_scaled,season.num,type.otc:type.mnka)
  
  
 recruit.yr.ipm <-  recruit.yr.priors%>%
@@ -253,8 +281,8 @@ nr <- nrow(recruit.yr.ipm)
 
 surv.yr.priors <-surv.yr%>%
   left_join(yr_df, by = c("year" = "yrs"))%>%
-     left_join(covariates%>%select(herd,year,dist.all_scale,clim1_scale,clim2_scale), by=c("herd", "year"))%>%
-  select(herd=herd_num,year=yr_idx,event,time,dist.all_scale,clim1_scale,clim2_scale)
+     left_join(covariates%>%select(herd,year,!!covar.names_scaled), by=c("herd", "year"))%>%
+  select(herd=herd_num,year=yr_idx,event,time,!!covar.names_scaled)
 
 surv.yr.ipm <- surv.yr.priors%>%
     group_by(herd,year)%>%
@@ -370,9 +398,8 @@ survey_timing <- recruit.yr.ipm %>%
   dplyr::select(herd, year, season.num) %>%
   rbind(expand.grid(
     herd = (1:nherd)[!(1:nherd) %in% unique(recruit.yr.ipm$herd)],
-    # yr_idx=(1:nyr)[!(1:nyr)%in%unique(afr%>%
-    #                                     left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
-    year = 1,
+    year=(1:nyr)[!(1:nyr)%in%unique(afr%>%
+                                       left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
     season.num = 1
   )) %>%
   tidyr::spread(year, season.num)
@@ -396,9 +423,8 @@ count.otc <- recruit.yr.ipm %>%
   dplyr::select(herd, year, type=type.otc) %>%
   rbind(expand.grid(
     herd = (1:nherd)[!(1:nherd) %in% unique(recruit.yr.ipm$herd)],
-    # yr_idx=(1:nyr)[!(1:nyr)%in%unique(afr%>%
-    #                                     left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
-    year = 1,
+    year=(1:nyr)[!(1:nyr)%in%unique(afr%>%
+                                       left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
     type = 1
   )) %>%
   tidyr::spread(year, type)
@@ -410,9 +436,8 @@ count.osc <- recruit.yr.ipm %>%
   dplyr::select(herd, year, type=type.osc) %>%
   rbind(expand.grid(
     herd = (1:nherd)[!(1:nherd) %in% unique(recruit.yr.ipm$herd)],
-    # yr_idx=(1:nyr)[!(1:nyr)%in%unique(afr%>%
-    #                                     left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
-    year = 1,
+    year=(1:nyr)[!(1:nyr)%in%unique(afr%>%
+                                       left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
     type = 1
   )) %>%
   tidyr::spread(year, type)
@@ -424,9 +449,8 @@ count.mnka <- recruit.yr.ipm %>%
   dplyr::select(herd, year, type=type.mnka) %>%
   rbind(expand.grid(
     herd = (1:nherd)[!(1:nherd) %in% unique(recruit.yr.ipm$herd)],
-    # yr_idx=(1:nyr)[!(1:nyr)%in%unique(afr%>%
-    #                                     left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
-    year = 1,
+    year=(1:nyr)[!(1:nyr)%in%unique(afr%>%
+                                       left_join(yr_df, by = c("year" = "yrs"))%>%pull(yr_idx))],
     type = 1
   )) %>%
   tidyr::spread(year, type)
@@ -526,22 +550,47 @@ single.params <- tibble(
 )
 ```
 
-## Join S and R to covariates for data exploration
+## Alternate survival parameritization for JW
+```{r S for JW, results='hide', message=FALSE, warning=FALSE}
 
-```{r Prep data for IPM, results='hide', message=FALSE, warning=FALSE}
+# Takes a data.frame 'df' with columns c('id','start','end','dead')
+
+
+## transform into daily survival
+source(here::here("other", "seasonalsurvival_fn.r"))
+surv.day <- surv.yr%>%
+  filter(time>0)%>%
+  dplyr::select(id, herd, DateEntry.bio=enter.date, DateExit.bio=exit.date, event) %>%
+  mutate(id_period = paste0(id, DateEntry.bio)) %>%
+  ungroup() %>%
+  stretch_survival_data("1 day") %>%
+  mutate(year = year(DateEntry.bio),
+         day=(DateEntry.bio-min(DateEntry.bio))%>%as.numeric(),
+         alive=abs(1-dead))%>%
+  left_join(hd%>%select(herd,herd_num), by="herd")
+
+surv.day.wide <- surv.day%>%
+  arrange(day)%>%
+  select(id,herd=herd_num,day,alive)%>%
+  pivot_wider(names_from=day, values_from=alive)
+
+
+```
+## Join S and R to covariates for data exploration
+```{r join SR, results='hide', message=FALSE, warning=FALSE}
 sdat.plot <- read_csv(here::here("data/clean/survival.csv"))%>%
   left_join(covariates%>%
               mutate(year=year)%>% ##this should probably be year-1 but don't have enough covar data
-              select(herd,year,dist.all,dist.all_scale,clim1,clim1_scale,clim2,clim2_scale),
+              select(herd,year,!!covar.names, !!covar.names_scaled),
             by=c("herd","year"))%>%
-  pivot_longer(dist.all:clim2_scale)%>%
+  pivot_longer(c(covar.names, covar.names_scaled))%>%
   mutate(value=as.numeric(value))
 
 rdat.plot <- read_csv(here::here("data/clean/recruitment.csv"))%>%
   left_join(covariates%>%
-              select(herd,year,dist.all,dist.all_scale,clim1,clim1_scale,clim2,clim2_scale),
+              select(herd,year,!!covar.names, !!covar.names_scaled),
             by=c("herd","year"))%>%
-  pivot_longer(dist.all:clim2_scale)%>%
+  pivot_longer(c(covar.names, covar.names_scaled))%>%
   mutate(value=as.numeric(value),
          season=case_when(season_int==1~10,
                           season_int==2~5,
@@ -562,12 +611,12 @@ write_csv(surv.yr.ipm, here::here("data/clean/forIPM/surv.yr.ipm.csv"))
 write_csv(recruit.yr.priors, here::here("data/clean/forIPM/recruit.yr.priors.csv"))
 write_csv(recruit.yr.ipm, here::here("data/clean/forIPM/recruit.yr.ipm.csv"))
 write_csv(counts, here::here("data/clean/forIPM/counts.csv"))
+write_csv(surv.day.wide, here::here("data/clean/forIPM/surv.day.wide.csv"))
 
 ## covariates
-saveRDS(dist.all, here::here("data/clean/forIPM/dist.all.rds"))
-saveRDS(clim1, here::here("data/clean/forIPM/clim1.rds"))
-saveRDS(clim2, here::here("data/clean/forIPM/clim2.rds"))
 write_csv(covariates, here::here("data/clean/forIPM/covariates_scaled.csv"))
+saveRDS(covar.names, here::here("data/clean/forIPM/covariate_names.rds"))
+
 
 ## other
 #write_csv(first_per_herd, here::here("data/clean/forIPM/first_per_herd.csv"))

@@ -1,0 +1,450 @@
+---
+title: "Asses pop trends with Climarte-Disturbance model"
+author: "Clayton T. Lamb"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: github_document
+---
+
+
+```{r render, eval=FALSE,include=FALSE}
+# rmarkdown::render(here::here("jags", 'run_IPM.Rmd'),
+#                   output_file =  "README.md")
+
+knitr::purl(input=here::here("scripts_r", '4.results_summary.Rmd'),
+                  output =  here::here("scripts_r", '4.results_summary.r'))
+```
+
+
+## Load Data
+```{r Load packages and data, results='hide', message=FALSE, warning=FALSE}
+library(ggmap)
+library(raster)
+library(RStoolbox)
+library(ggsn)
+library(MCMCvis)
+library(tidybayes)
+library(ggmcmc)
+library(boot)
+library(cowplot)
+library(hrbrthemes)
+library(lme4)
+library(tidymodels)
+library(broom.mixed)
+library(RColorBrewer)
+library(ggeffects)
+library(ggridges)
+library(ggrepel)
+library(tidylog)
+library(gt)
+library(patchwork)
+library(sf)
+library(mapview)
+library(basemaps)
+library(ggtext)
+library(rlang)
+library(tidyverse)
+
+# Load data ---------------------------------------------------------------
+
+## IPM Output
+out <- readRDS(file = here::here("jags/output/BCAB_CaribouIPM_posteriors_03102023.rds"))
+
+## IPM input to compare results
+hd <- read.csv(here::here("data/clean/blueprint.csv"))
+hn <- hd %>%
+  dplyr::select(herd, herd_num)
+afs <- read.csv(here::here("data/clean/survival.csv")) %>%
+  arrange(herd) %>%
+  left_join(hn, by = "herd")
+afr <- read.csv(here::here("data/clean/recruitment.csv")) %>%
+  arrange(herd) %>%
+  left_join(hn, by = "herd")
+counts <- read.csv(here::here("data/clean/counts.csv")) %>%
+  arrange(herd) %>%
+  left_join(hn, by = "herd")
+trt <- read.csv(here::here("data/clean/treatments.csv")) %>%
+  arrange(herd) %>%
+  left_join(hn, by = "herd")
+covar.names <- readRDS(here::here("data/clean/forIPM/covariate_names.rds"))
+covariates <- read_csv(here::here("data/clean/forIPM/covariates_scaled.csv")) %>%
+  dplyr::select(herd, year, !!covar.names)
+
+labels <- read.csv(here::here("data/clean/labels.csv"))
+
+#  Years of study
+yr_df <- read.csv(here::here("data/clean/forIPM/yr_df.csv"))
+```
+
+
+## ----Data housekeeping
+```{r Data housekeeping, results='hide', message=FALSE, warning=FALSE}
+## set up colors for plotting
+display.brewer.pal(8, "Accent")
+cols <- RColorBrewer::brewer.pal(8, "Accent")
+
+### Change Narraway BC to Bearhole Redwillow
+trt <- trt %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
+hd <- hd %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
+counts <- counts %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
+afr <- afr %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
+afs <- afs %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
+
+
+# Pull out some values, summarize to demog data frame ---------------------
+
+#### TREATMENT COMBOS
+treatment.combos <- trt %>%
+  filter(applied == 1) %>%
+  group_by(herd, year) %>%
+  summarize(
+    trt = paste(
+      gsub(" ", "", treatment), # Remove spaces
+      collapse = "-" # Add - between treatments
+    ),
+    .groups = "drop"
+  ) %>%
+  dplyr::select(herd, yrs = year, trt)
+
+
+## pull posterior draws, add in herd, year, and treatment to each herd-year
+ndraws <- 700
+demog <- out %>%
+  spread_draws(
+    c(totNMF, totN, totAdults, S, R_adj, lambda)[i, j],
+    ndraws = ndraws
+  ) %>%
+  median_qi(.width = 0.9) %>%
+  left_join(yr_df %>% rename(j = yr_idx), by = "j") %>%
+  left_join(hd %>% dplyr::select(herd, i = herd_num), by = "i") %>%
+  left_join(treatment.combos, by = c("herd", "yrs")) %>%
+  mutate(trt = replace_na(trt, "Reference")) %>%
+  rename(R = R_adj, R.lower = R_adj.lower, R.upper = R_adj.upper) %>%
+  ungroup()
+
+
+## filter herds to a period where not fully extirpated
+extirpated.yr <- demog %>%
+  filter(round(totNMF, 0) == 0) %>%
+  group_by(herd) %>%
+  filter(yrs == min(yrs)) %>%
+  ungroup()
+
+
+herds <- unique(demog$herd)
+
+demog.trim <- tibble()
+for (i in 1:length(herds)) {
+  if (herds[i] %in% extirpated.yr$herd) {
+    yr <- extirpated.yr %>%
+      dplyr::filter(herd == !!herds[i])
+    a <- demog %>%
+      dplyr::filter(herd == !!herds[i] & yrs <= yr$yrs)
+  }
+
+  if (!herds[i] %in% extirpated.yr$herd) {
+    a <- demog %>%
+      dplyr::filter(herd == !!herds[i])
+  }
+
+  demog.trim <- bind_rows(a, demog.trim)
+}
+
+demog <- demog.trim
+rm(demog.trim)
+rm(a)
+rm(yr)
+
+
+## ----Firstyr
+raw.demog <- rbind(
+  afr %>% dplyr::select(herd, year, est) %>% mutate(type = "Recruit"),
+  afs %>% dplyr::select(herd, year, est) %>% mutate(type = "Surv"),
+  counts %>% dplyr::select(herd, year, est = Est_CL) %>% mutate(type = "Count")
+)
+
+### Identify first year of demographic data for each herd
+first.yr <- raw.demog %>%
+  dplyr::select(herd, first.year = year) %>%
+  distinct() %>%
+  group_by(herd) %>%
+  filter(first.year == min(first.year))
+
+ggplot(first.yr, aes(x = first.year)) +
+  stat_bin(aes(y = cumsum(..count..)), geom = "step") +
+  theme_ipsum() +
+  labs(
+    x = "Year", y = "Cumulative count",
+    title = "First year of demographic data for the 41 SMC herds",
+    subtitle = "Cumulative count of herds being monitored through time"
+  ) +
+  theme(
+    plot.title = element_text(size = 18),
+    axis.title.y = element_text(size = 15),
+    axis.title.x = element_text(size = 15),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14),
+    legend.position = "bottom"
+  )
+
+
+demog.mod <- demog %>% filter(totNMF > 20)%>% ## modelling data that doesn't include functionally extirpated herds, demography gets unstable
+  rename(year = yrs) %>%
+left_join(covariates, by=c("herd","year"))%>% ##add covariates
+  ## keep only IPM results for each herd after first yr
+  left_join(first.yr, by = "herd") %>%
+  filter(year >= first.year)
+
+ggplot(demog, aes(y = log(lambda), x = totNMF)) +
+  geom_point(alpha = 0.3) +
+  geom_vline(xintercept = 20, color = "red") +
+  geom_hline(yintercept = 0, color = "grey", linetype = "dashed") +
+  theme_ipsum() +
+  theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 15),
+    strip.text.y = element_text(size = 15)
+  ) +
+  labs(
+    title = "Population growth unstable when subpopulation too small",
+    subtitle = "remove data below functionally extirpated abundance (red line)",
+    x = "Subopulation abundance",
+    y = "Instanteous rate of increase (r)"
+  )
+```
+
+## Plot herd abundance
+```{r Plot herd abundance, fig.height=11, fig.width=15, message=FALSE}
+
+## Prep data and layout for plot
+
+## treatments for plot,and where they go
+trt.plot <- trt %>%
+  filter(applied == 1) %>%
+  left_join(demog %>% group_by(herd) %>% summarize(max = max(totNMF.upper))) %>%
+  mutate(y = case_when(
+    treatment %in% "reduce wolves" & herd %in% "South Selkirks" ~ 140,
+    treatment %in% "transplant" & herd %in% "South Selkirks" ~ 165,
+    treatment %in% "transplant" & herd %in% "Purcells South" ~ 180,
+    treatment %in% "reduce moose" & herd %in% "Frisby-Boulder" ~ 200,
+    treatment %in% "reduce wolves" & herd %in% "Barkerville" ~ max - (max * 0.1),
+    treatment %in% "sterilize wolves" & herd %in% "Barkerville" ~ max - (max * 0.25),
+    treatment %in% "reduce wolves" & herd %in% "Kennedy Siding" ~ max - (max * 0.1),
+    treatment %in% "feed" & herd %in% "Kennedy Siding" ~ max - (max * 0.25),
+    treatment %in% "reduce wolves" ~ max - (max * 0.1),
+    treatment %in% "transplant" ~ max - (max * 0.15),
+    treatment %in% "reduce moose" ~ max - (max * 0.2),
+    treatment %in% "sterilize wolves" ~ max - (max * 0.25),
+    treatment %in% "pen" ~ max - (max * 0.3),
+    treatment %in% "feed" ~ max - (max * 0.35)
+  ))
+
+### a couple functions for the red boxes around herd names of extirpated
+element_textbox_highlight <- function(..., hi.labels = NULL, hi.fill = NULL,
+                                      hi.col = NULL, hi.box.col = NULL, hi.family = NULL) {
+  structure(
+    c(
+      element_textbox(...),
+      list(hi.labels = hi.labels, hi.fill = hi.fill, hi.col = hi.col, hi.box.col = hi.box.col, hi.family = hi.family)
+    ),
+    class = c("element_textbox_highlight", "element_textbox", "element_text", "element")
+  )
+}
+
+element_grob.element_textbox_highlight <- function(element, label = "", ...) {
+  if (label %in% element$hi.labels) {
+    element$fill <- element$hi.fill %||% element$fill
+    element$colour <- element$hi.col %||% element$colour
+    element$box.colour <- element$hi.box.col %||% element$box.colour
+    element$family <- element$hi.family %||% element$family
+  }
+  NextMethod()
+}
+
+## Herd Abundance
+ggplot() +
+  geom_ribbon(
+    data = demog %>%
+      ungroup() %>%
+      left_join(labels, by = "herd") %>%
+      mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
+        fct_reorder(.f = ., .x = number_label, .fun = max)),
+    aes(x = yrs, y = totNMF, ymin = totNMF.lower, ymax = totNMF.upper), alpha = 0.4, color = NA, fill = cols[3]
+  ) +
+  geom_line(
+    data = demog %>%
+      ungroup() %>%
+      left_join(labels, by = "herd") %>%
+      mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
+        fct_reorder(number_label)),
+    aes(x = yrs, y = totNMF, ymin = totNMF.lower, ymax = totNMF.upper), size = 1, color = cols[3]
+  ) +
+  geom_rug(
+    data = raw.demog %>%
+      ungroup() %>%
+      left_join(labels, by = "herd") %>%
+      mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
+        fct_reorder(number_label)),
+    aes(x = year), sides = "t", length = unit(0.05, "npc"), alpha = 0.5
+  ) +
+  theme_ipsum() +
+  theme(legend.position = "none") +
+  facet_wrap(vars(herd), scales = "free_y", ncol = 7) +
+  labs(x = "", y = "", title = "Abundance") +
+  expand_limits(y = 0) +
+  scale_x_continuous(
+    limits = c(1970, 2026),
+    breaks = seq(1970, 2020, by = 20)
+  ) +
+  theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text = element_textbox_highlight(
+      size = 14,
+      fill = "white", box.color = "white",
+      halign = .5, linetype = 1, r = unit(0, "pt"), width = unit(1, "npc"),
+      padding = margin(b = 2, t = 2, r = 2, l = 2), margin = margin(b = 8, t = 2),
+      hi.fill = "firebrick", hi.box.col = "firebrick", hi.col = "white"
+    ),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = 15)
+  ) +
+  geom_point(
+    data = counts %>%
+      ungroup() %>%
+      left_join(labels, by = "herd") %>%
+      mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
+        fct_reorder(number_label)),
+    aes(x = year, y = Est_CL), size = 0.5, alpha = 0.7
+  ) +
+  geom_linerange(
+    data = counts %>%
+      ungroup() %>%
+      mutate(Est_CL.max = case_when(Est_CL.max > 5000 ~ 5000, TRUE ~ Est_CL.max)) %>%
+      left_join(labels, by = "herd") %>% mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
+        fct_reorder(number_label)),
+    aes(x = year, ymin = Est_CL.min, ymax = Est_CL.max), alpha = 0.5
+  ) +
+  geom_point(
+    data = trt.plot %>%
+      ungroup() %>%
+      left_join(labels, by = "herd") %>%
+      mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
+        fct_reorder(number_label)),
+    aes(x = year, y = y, group = treatment), size = 0.5
+  ) +
+  scale_color_manual(values = cols[-4]) +
+  geom_text(
+    data = trt.plot %>%
+      ungroup() %>%
+      distinct(herd, treatment, y) %>%
+      mutate(t = str_remove(treatment, "reduce ") %>% str_sub(1, 1)) %>%
+      left_join(labels, by = "herd") %>% mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
+        fct_reorder(number_label)),
+    aes(label = t, x = 2025, y = y),
+    direction = "y"
+  ) +
+  coord_cartesian(clip = "off")
+
+
+ggsave(here::here("plots", "abundance.png"), width = 15, height = 11, bg = "white")
+
+```
+
+
+## Plot draws
+```{r plot draws, results='hide', message=FALSE, warning=FALSE}
+draws <- out%>%
+  gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+               muR, beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r)%>%
+  mutate(type="Posteriors")%>%
+  rbind(out.priors%>%
+          gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+                       muR, beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r)%>%
+          mutate(type="Priors"))
+
+draws%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
+  ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+  geom_vline(xintercept = 0, linetype="dashed")
+
+draws%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r","muS","muR"))%>%
+  ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable))+
+  geom_vline(xintercept = 0, linetype="dashed")
+```
+
+```{r explore lambda relationships, fig.height=11, fig.width=15, message=FALSE}
+plot.dat <- demog.mod%>%
+   group_by(herd) %>%
+   arrange(year) %>%
+   ## calculate alternate population growth rates (over 3 and 5 year)
+   mutate(herd=as.factor(herd),
+          trt=as.factor(trt),
+          weight.i=1/((lambda.upper-lambda.lower)/lambda),
+          weights=weight.i/mean(weight.i),
+     lambda_3 = (totNMF / lag(totNMF, 3))^(1 / 3),
+     lambda_5 = (totNMF / lag(totNMF, 5))^(1 / 5)
+   )%>%ungroup
+
+plot.dat%>%
+  filter(trt=="Reference")%>%
+  ggplot(aes(x=dist.hum, y=lambda))+
+  geom_point()+
+  geom_hline(yintercept =1, linetype="dashed")+
+  geom_smooth()
+
+plot.dat%>%
+  filter(trt=="Reference")%>%
+  ggplot(aes(x=dist.hum, y=lambda_5))+
+  geom_point()+
+  geom_hline(yintercept =1, linetype="dashed")+
+  geom_smooth()
+
+
+
+library(mgcv)
+m1 <- mgcv::gam(
+  lambda_3 ~ 
+    s(snow.depth)+
+    s(warm.dry.summer) +
+    s(dist.hum,k=6)+
+    
+    s(herd, bs = "re")+
+    
+    s(snow.depth, herd, bs="re") +
+    s(warm.dry.summer, herd, bs="re")+ 
+    s(dist.hum, herd, bs="re"),
+  data = plot.dat)
+
+
+summary(m1)$r.sq
+
+plot(m1, page = 1, scheme = 2)
+
+m1 <- mgcv::gam(
+  totNMF ~ 
+    s(snow.depth)+
+    s(warm.dry.summer) +
+    s(dist.hum,k=6)+
+    
+    s(herd, bs = "re")+
+    
+    s(snow.depth, herd, bs="re") +
+    s(warm.dry.summer, herd, bs="re")+ 
+    s(dist.hum, herd, bs="re"),
+  data = plot.dat%>%filter(!herd%in%c("Takla","Itcha-Ilgachuz")))
+
+
+summary(m1)$r.sq
+
+plot(m1, page = 1, scheme = 2)
+```
