@@ -64,16 +64,8 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 		S[h,yr] <- pow(s.daily[h,yr], 365)
 		}}
 
-# Random effect for year-SG
-	for(sg in 1:nsight_grp){	
-		sight_tau_yr_sg[sg] <- 1/(sight_sd_yr_sg[sg]^2)
-		sight_sd_yr_sg[sg] ~ dunif(0, 10)
-		for(yr in 1:nyr){
-			sight_yr_sg[yr, sg] ~ dnorm(0, sight_tau_yr_sg[sg]) 
-			}
-		}
-	
-# Sightability
+
+# Sightability for herds/year without sightability
 	for(sg in 1:nsight_grp){	
 		p_logit[sg] ~ dnorm(mean_grp_p[sg], mean_grp_ptau[sg])T(0, 1) # 0 - 1
 		p_mu[sg] <- logit(p_logit[sg]) # -Inf - Inf
@@ -84,7 +76,7 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 	#   sightability estimate
 	for(h in 1:nherd){	
 		for(yr in first[h]:nyr){
-			logit(p[h, yr]) <- p_mu[sight_grp[h]] + sight_yr_sg[yr,sight_grp[h]]
+			logit(p[h, yr]) <- p_mu[sight_grp[h]]
 		}
 	}
 

@@ -60,8 +60,12 @@ yr_df <- read_csv(here::here("data/clean/forIPM/yr_df.csv"))
 
 ## Estimate Prior
 ```{r Estimate Priors, results='hide', message=FALSE, warning=FALSE}
+mean.s <-mean(1-(sdat$events/sdat$trials))
+mean.r <-mean(rdat$events/rdat$trials)
 
 ipm.prior.dat <- list(
+  mean.s=mean.s,
+  mean.r=mean.r,
   ns=nrow(sdat),
   nr=nrow(rdat),
   sdat=sdat,
@@ -78,7 +82,7 @@ ipm.prior.dat <- list(
 prior.mod <-
   "model{ 
     # priors
-	meanS <- logit(0.9995)
+	meanS <- logit(mean.s)
 	muS ~ dnorm(meanS, 100)
     beta.dist.s ~ dunif(-10,10)
     beta.snow.depth.s ~ dunif(-10,10)
@@ -86,7 +90,7 @@ prior.mod <-
     beta.warm.dry.summer.s ~ dunif(-10,10)
     beta.rain.on.snow.s ~ dunif(-10,10)
     
-	meanR <- logit(0.15)
+	meanR <- logit(mean.r)
 	muR ~ dnorm(meanR, 100)
     beta.dist.r ~ dunif(-10,10)
     beta.snow.depth.r ~ dunif(-10,10)
@@ -196,6 +200,9 @@ first <- rep(1,nherd)
 ## Gather data inputs in a list
 
 ipm_dat <- list(
+  mean.s=mean.s,
+  mean.r=mean.r,
+  
   nherd = nherd,
   nyr = nyr,
   first = first,
@@ -280,9 +287,10 @@ model_parms <- c(
   
   "totNMF", "lambda",
   
-  "S", "R",  "R_adj",
+  "S", "R",  "R_adj", 
+  #"R.ad",
   
-  "muS", "muR",
+  "muS", "muR", 
   
   "offset",
   "beta.dist.s",
@@ -290,11 +298,20 @@ model_parms <- c(
   "beta.start.spring.s",
   "beta.warm.dry.summer.s",
   "beta.rain.on.snow.s",
+  
   "beta.dist.r",
   "beta.snow.depth.r",
   "beta.start.spring.r",
   "beta.warm.dry.summer.r",
-  "beta.rain.on.snow.r"
+  "beta.rain.on.snow.r",
+  
+  "beta.type.otc.r", "beta.type.osc.r", "beta.type.mnka.r",
+  
+  #"sight_sd_yr_sg","sight_tau_yr_sg","sight_yr_sg", 
+  
+  "p_mu","p", "sight_est",
+  
+  "sexratio"
 )
 ```
 
@@ -312,10 +329,16 @@ nit <- 50000
 # nad <- 20000
 # nit <- 300000 
 
+# nth <- 20
+# nbu <- 200
+# nch <- 3
+# nad <- 200
+# nit <- 1000
+
 out <- jagsUI::jags(ipm_dat, 
                     inits = ipm_inits,
                     model_parms,
-                    model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+                    model.file = here::here("jags/Dist_Clim_IPM_rawVR_noRE.txt"),
                     n.chains = nch,
                     n.cores = nch,
                     n.iter = nit,
@@ -323,5 +346,30 @@ out <- jagsUI::jags(ipm_dat,
                     n.thin = nth,
                     n.adapt = nad)
 
-saveRDS(out, file = here::here("jags/output/BCAB_CaribouIPM_posteriors_03102023.rds"))
+saveRDS(out, file = here::here("jags/output/BCAB_CaribouIPM_posteriors.rds"))
+```
+## Plot draws
+```{r plot draws, results='hide', message=FALSE, warning=FALSE}
+draws <- out%>%
+  gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+               muR, beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r)%>%
+  mutate(type="Posteriors")%>%
+  rbind(out.priors%>%
+          gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+                       muR, beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r)%>%
+          mutate(type="Priors"))
+
+draws%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
+  ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable), scales="free")+
+  geom_vline(xintercept = 0, linetype="dashed")
+
+draws%>%
+  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r","muS","muR"))%>%
+  ggplot(aes(x=.value, fill=type))+
+  geom_density(alpha=0.5)+
+  facet_wrap(vars(.variable))+
+  geom_vline(xintercept = 0, linetype="dashed")
 ```

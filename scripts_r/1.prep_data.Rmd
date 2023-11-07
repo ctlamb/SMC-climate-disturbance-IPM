@@ -68,7 +68,7 @@ covariates <- read.csv(here::here("data/spatial/covariates_simplified.csv")) %>%
 ## Line up years so that it all affects animals by March year X count. So summer and spring need to be X+1
 ```{r filter recovery actions, results='hide', message=FALSE, warning=FALSE}
 
-covar.names <- covariates%>%select(-herd,-year,-herd_num)%>%colnames ##remove herd and year
+covar.names <- covariates%>%select(-herd,-year,-herd_num,-ECCC)%>%colnames ##remove herd and year
 
 covar.names_scaled <- paste0(covar.names,"_scale")
 
