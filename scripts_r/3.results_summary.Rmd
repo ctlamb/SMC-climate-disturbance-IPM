@@ -229,13 +229,23 @@ ggplot(first.yr, aes(x = first.year)) +
   )
 
 
+##shift S to y-1
+s.shift <- demog%>%
+  mutate(year=yrs+1)%>%
+  select(herd,year,S, S.lower, S.upper)
+  
+
 demog.mod <- demog %>%
   filter(totNMF > 20) %>% ## modelling data that doesn't include functionally extirpated herds, demography gets unstable
   rename(year = yrs) %>%
+  select(-S, -S.lower, -S.upper)%>%
+  left_join(s.shift, by=c("herd","year"))%>%
   left_join(covariates, by = c("herd", "year")) %>% ## add covariates
   ## keep only IPM results for each herd after first yr
   left_join(first.yr, by = "herd") %>%
   filter(year >= first.year)
+
+  
 
 ggplot(demog, aes(y = log(lambda), x = totNMF)) +
   geom_point(alpha = 0.3) +
@@ -354,18 +364,20 @@ ggplot() +
   geom_point(
     data = counts %>%
       ungroup() %>%
+      left_join(treatment.combos, by = c("herd","year"="yrs"))%>%
       left_join(labels, by = "herd") %>%
       mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(number_label)),
-    aes(x = year, y = Est_CL), size = 0.5, alpha = 0.7
+    aes(x = year, y = Est_CL, color=!is.na(trt), fill=!is.na(trt)), size = 0.5, alpha = 0.7
   ) +
   geom_linerange(
     data = counts %>%
       ungroup() %>%
+      left_join(treatment.combos, by = c("herd","year"="yrs"))%>%
       mutate(Est_CL.max = case_when(Est_CL.max > 5000 ~ 5000, TRUE ~ Est_CL.max)) %>%
       left_join(labels, by = "herd") %>% mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(number_label)),
-    aes(x = year, ymin = Est_CL.min, ymax = Est_CL.max), alpha = 0.5
+    aes(x = year, ymin = Est_CL.min, ymax = Est_CL.max, color=!is.na(trt)), alpha = 0.5
   ) +
   geom_point(
     data = trt.plot %>%
@@ -443,7 +455,7 @@ lambda.mod <- demog.draws %>%
             .upper=(quantile(estimate,0.975)))
 
 
-yr.bin <- 5
+yr.bin <- 10
 mod.dat <- demog.mod %>%
   filter(trt == "Reference") %>%
   group_by(herd, year = ceiling(year / yr.bin) * yr.bin) %>%

@@ -108,7 +108,7 @@ afs <- afs %>%
   ## remove years during transplant, where pop growing due to directly adding animals
   filter(
     !(herd %in% "Charlotte Alplands" & year %in% c(1984:1991) - 1),
-    !(herd %in% "Telkwa" & year %in% c(1997:1999) - 1),
+    !(herd %in% "Telkwa" & year %in% c(1997:2010) - 1),
     !(herd %in% "South Selkirks" & year %in% c(1987:1989) - 1),
     !(herd %in% "Purcell South" & year %in% c(2012:2013) - 1)
   ) %>%
@@ -120,7 +120,7 @@ afr <- afr %>%
   ## remove years during transplant, where pop growing due to directly adding animals
   filter(
     !(herd %in% "Charlotte Alplands" & year %in% c(1984:1991)),
-    !(herd %in% "Telkwa" & year %in% c(1997:1999)),
+    !(herd %in% "Telkwa" & year %in% c(1997:2010)),
     !(herd %in% "South Selkirks" & year %in% c(1987:1989)),
     !(herd %in% "Purcell South" & year %in% c(2012:2013))
   ) %>%
@@ -132,7 +132,7 @@ counts <- counts %>%
   ## remove years during transplant, where pop growing due to directly adding animals
   filter(
     !(herd %in% "Charlotte Alplands" & year %in% c(1984:1991)),
-    !(herd %in% "Telkwa" & year %in% c(1997:1999)),
+    !(herd %in% "Telkwa" & year %in% c(1997:2010)),
     !(herd %in% "South Selkirks" & year %in% c(1987:1989)),
     !(herd %in% "Purcell South" & year %in% c(2012:2013))
   ) %>%
@@ -144,7 +144,7 @@ sexratios <- sexratios %>%
   ## remove years during transplant, where pop growing due to directly adding animals
   filter(
     !(herd %in% "Charlotte Alplands" & year %in% c(1984:1991)),
-    !(herd %in% "Telkwa" & year %in% c(1997:1999)),
+    !(herd %in% "Telkwa" & year %in% c(1997:2010)),
     !(herd %in% "South Selkirks" & year %in% c(1987:1989)),
     !(herd %in% "Purcell South" & year %in% c(2012:2013))
   ) %>%
@@ -156,7 +156,7 @@ surv.yr <- surv.yr%>%
   ##remove years during transplant, where pop growing due to directly adding animals
   filter(
     !(herd %in% "Charlotte Alplands" & year %in% c(1984:1991)),
-    !(herd %in% "Telkwa" & year %in% c(1997:1999)),
+    !(herd %in% "Telkwa" & year %in% c(1997:2010)),
     !(herd %in% "South Selkirks" & year %in% c(1987:1989)),
     !(herd %in% "Purcell South" & year %in% c(2012:2013))
   ) %>%
@@ -168,7 +168,7 @@ recruit.yr <- recruit.yr%>%
   ##remove years during transplant, where pop growing due to directly adding animals
   filter(
     !(herd %in% "Charlotte Alplands" & year %in% c(1984:1991)),
-    !(herd %in% "Telkwa" & year %in% c(1997:1999)),
+    !(herd %in% "Telkwa" & year %in% c(1997:2010)),
     !(herd %in% "South Selkirks" & year %in% c(1987:1989)),
     !(herd %in% "Purcell South" & year %in% c(2012:2013))
   )%>%
