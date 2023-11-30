@@ -8,3 +8,4 @@ jags/output
 jags/old
 other
 scripts_r/other
+.RDataTmp
