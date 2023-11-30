@@ -69,7 +69,10 @@ trt <- read.csv(here::here("data/clean/treatments.csv")) %>%
   left_join(hn, by = "herd")
 covar.names <- readRDS(here::here("data/clean/forIPM/covariate_names.rds"))
 covariates <- read_csv(here::here("data/clean/forIPM/covariates_scaled.csv")) %>%
-  dplyr::select(herd, year, !!covar.names)
+  dplyr::select(herd, year, !!covar.names, !!paste0(covar.names,"_scale"))
+# covariates_scaled <- read_csv(here::here("data/clean/forIPM/covariates_scaled.csv")) %>%
+#   dplyr::select(herd, year, !!paste0(covar.names,"_scale"))
+  
 
 labels <- read.csv(here::here("data/clean/labels.csv"))
 
@@ -148,7 +151,7 @@ treatment.combos <- trt %>%
 ndraws <- 1000
 demog <- out %>%
   spread_draws(
-    c(totNMF, totN, totAdults, S, R_adj, lambda)[i, j],
+    c(totNMF, totN, totAdults, S, R_adj, lambda, sexratio)[i, j],
     ndraws = ndraws
   ) %>%
   median_qi(.width = 0.9) %>%
@@ -229,7 +232,7 @@ ggplot(first.yr, aes(x = first.year)) +
   )
 
 
-##shift S to y-1
+##shift S to y+1
 s.shift <- demog%>%
   mutate(year=yrs+1)%>%
   select(herd,year,S, S.lower, S.upper)
@@ -264,6 +267,24 @@ ggplot(demog, aes(y = log(lambda), x = totNMF)) +
     x = "Subopulation abundance",
     y = "Instanteous rate of increase (r)"
   )
+
+
+ggplot(demog, aes(y = sexratio, x = yrs)) +
+  geom_point() +
+  theme_ipsum() +
+  theme(
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 15),
+    strip.text.y = element_text(size = 15)
+  ) +
+  labs(
+    x = "Year",
+    y = "Sex ratio"
+  )+
+  facet_wrap(vars(herd))
+  
+
 ```
 
 ## Plot herd abundance
@@ -321,7 +342,7 @@ ggplot() +
       left_join(labels, by = "herd") %>%
       mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(.f = ., .x = number_label, .fun = max)),
-    aes(x = yrs, y = totNMF, ymin = totNMF.lower, ymax = totNMF.upper), alpha = 0.4, color = NA, fill = cols[3]
+    aes(x = yrs, y = totN, ymin = totN.lower, ymax = totN.upper), alpha = 0.4, color = NA, fill = cols[3]
   ) +
   geom_line(
     data = demog %>%
@@ -329,7 +350,7 @@ ggplot() +
       left_join(labels, by = "herd") %>%
       mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(number_label)),
-    aes(x = yrs, y = totNMF, ymin = totNMF.lower, ymax = totNMF.upper), size = 1, color = cols[3]
+    aes(x = yrs, y = totN, ymin = totN.lower, ymax = totN.upper), size = 1, color = cols[3]
   ) +
   geom_rug(
     data = raw.demog %>%
@@ -447,33 +468,52 @@ demog.draws <- out %>%
 
 lambda.mod <- demog.draws %>%
   group_by(.draw) %>%
-  do(tidy(glm(lambda ~ dist.hum + snow.depth + start.spring + warm.dry.summer + rain.on.snow, data =.))) %>%
+  do(tidy(glm(log(lambda) ~ dist.hum_scale + snow.depth_scale + start.spring_scale + warm.dry.summer_scale + rain.on.snow_scale, data =.))) %>%
   filter(!term %in% "(Intercept)")%>%
   group_by(term)%>%
   summarise(.value=median(estimate),
             .lower=(quantile(estimate,0.025)),
-            .upper=(quantile(estimate,0.975)))
+            .upper=(quantile(estimate,0.975)))%>%
+  mutate(var=case_when(term=="dist.hum_scale"~"dist",
+                       TRUE~str_remove(term,"_scale")),
+         type="lambda")%>%
+  select(var, .value, .lower, .upper, type)
 
 
-yr.bin <- 10
-mod.dat <- demog.mod %>%
-  filter(trt == "Reference") %>%
-  group_by(herd, year = ceiling(year / yr.bin) * yr.bin) %>%
-  summarize(
-    year = paste(first(year) - yr.bin, first(year), sep = "-"),
-    r = mean(log(lambda), na.rm = TRUE),
-    S = mean(log(S), na.rm = TRUE)%>%exp(),
-    R = mean(log(R), na.rm = TRUE)%>%exp(),
-    dist = mean(dist.hum, na.rm = TRUE),
-    snow.depth = mean(snow.depth, na.rm = TRUE),
-    start.spring = mean(start.spring, na.rm = TRUE),
-    warm.dry.summer = mean(warm.dry.summer, na.rm = TRUE),
-    rain.on.snow = mean(rain.on.snow, na.rm = TRUE)
-  ) %>%
-  ungroup()
+lambda.mod.mm <- demog.draws %>%
+  group_by(.draw) %>%
+  do(tidy(lmer(log(lambda) ~ dist.hum_scale + snow.depth_scale + start.spring_scale + warm.dry.summer_scale + rain.on.snow_scale + (1|herd), data =.))) %>%
+  filter(!(term %in% "(Intercept)" | effect!="fixed"))%>%
+  group_by(term)%>%
+  summarise(.value=median(estimate),
+            .lower=(quantile(estimate,0.025)),
+            .upper=(quantile(estimate,0.975)))%>%
+  mutate(var=case_when(term=="dist.hum_scale"~"dist",
+                       TRUE~str_remove(term,"_scale")),
+         type="lambda")%>%
+  select(var, .value, .lower, .upper, type)
 
-glm(r ~ dist + snow.depth + start.spring + warm.dry.summer + rain.on.snow, data = mod.dat)%>%
-  tidy()
+
+# 
+# yr.bin <- 1
+# mod.dat <- demog.mod %>%
+#   filter(trt == "Reference") %>%
+#   group_by(herd, year = ceiling(year / yr.bin) * yr.bin) %>%
+#   summarize(
+#     year = paste(first(year) - yr.bin, first(year), sep = "-"),
+#     r = mean(log(lambda), na.rm = TRUE),
+#     S = mean(log(S), na.rm = TRUE)%>%exp(),
+#     R = mean(log(R), na.rm = TRUE)%>%exp(),
+#     dist = mean(dist.hum_scale, na.rm = TRUE),
+#     snow.depth = mean(snow.depth_scale, na.rm = TRUE),
+#     start.spring = mean(start.spring_scale, na.rm = TRUE),
+#     warm.dry.summer = mean(warm.dry.summer_scale, na.rm = TRUE),
+#     rain.on.snow = mean(rain.on.snow_scale, na.rm = TRUE)
+#   ) %>%
+#   ungroup()
+# 
+# glm(r ~ dist + snow.depth + start.spring + warm.dry.summer + rain.on.snow, data = mod.dat)%>%
+#   tidy()
 
 
 
@@ -488,15 +528,7 @@ out %>%
     var = str_sub(.variable, 6, -3)
   ) %>%
   select(var, .value, .lower, .upper, type) %>%
-  rbind(
-  glm(r ~ dist + snow.depth + start.spring + warm.dry.summer + rain.on.snow, data = mod.dat)%>%
-  tidy()%>%
-  mutate(type="lamba",
-         .lower=estimate-(1.96*std.error),
-         .upper=estimate+(1.96*std.error))%>%
-  filter(term!="(Intercept)")%>%
-  select(var=term, .value=estimate, .lower, .upper, type)
-  )%>%
+  rbind(lambda.mod.mm)%>%
   ggplot(aes(x = .value, xmin = .lower, xmax = .upper, color = type, y = var)) +
   geom_linerange(alpha = 0.8, position = position_dodge(width = 0.3)) +
   geom_point(position = position_dodge(width = 0.3)) +
@@ -678,16 +710,18 @@ ggplot(mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist),
   geom_point()
 
 
-ggplot(mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist)%>%filter(N>50),
-       aes(x=HEWSR,y=`LEWSR/Matrix`, size=r>1, color=r>1))+
+mod.dat.ch.50 <- mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist)%>%filter(N>50)
+
+ggplot(mod.dat.ch.50,
+       aes(x=HEWSR,y=`LEWSR/Matrix`, size=r>=1, color=r>=1))+
   geom_point(alpha=0.4)
 
-ggplot(mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist)%>%filter(N>50),
+ggplot(mod.dat.ch.50,
        aes(x=HEWSR,y=`LEWSR/Matrix`, size=r, color=r))+
   geom_point(alpha=0.5)
 
-ggplot(mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist)%>%filter(N>50),
-       aes(x=HEWSR,y=`LEWSR/Matrix`, size=r>0.995, color=r>0.995))+
+ggplot(mod.dat.ch.50,
+       aes(x=HEWSR,y=`LEWSR/Matrix`, size=r>=1, color=r>=1))+
    geom_rect(aes(xmin = 0-0.005, xmax = 0.05, ymin = 0-0.01, ymax = 0.25),
                fill = "transparent", color = "grey", size = 1, linetype="dashed")+
   geom_point(alpha=0.5)+
@@ -698,7 +732,41 @@ ggplot(mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist)%>%filter
 
 
 
-ggplot(mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist)%>%filter(N>50),
+ggplot(mod.dat.ch.50,
        aes(x=HEWSR,y=`LEWSR/Matrix`, size=N, color=N))+
   geom_point(alpha=0.4)
+
+
+mod.dat.ch.50%>%
+  filter(!herd%in%c("Maligne", "Tonquin"))%>% ##no CH delineated
+  ungroup%>%
+  mutate(HEWSR.cat=cut_width(HEWSR, 0.05),
+         Matrix.cat=cut_width(`LEWSR/Matrix`, 0.1)
+         )%>%
+  group_by(HEWSR.cat,Matrix.cat)%>%
+  summarise(lambda=exp(log(r)%>%mean),
+            n=n(),
+            ss=sum(r>=1)/n)%>%
+  ggplot()+
+  geom_tile(aes(x=HEWSR.cat, y=Matrix.cat, fill=ss))+
+  theme_ipsum()+
+    labs(x="High elevation disturbance (proportion)",
+       y="Matrix disturbance (proportion)")
+
+mod.dat.ch.50%>%
+  filter(!herd%in%c("Maligne", "Tonquin"))%>% ##no CH delineated
+  ungroup%>%
+  mutate(HEWSR.cat=cut_width(HEWSR, 0.05),
+         Matrix.cat=cut_width(`LEWSR/Matrix`, 0.1)
+         )%>%
+  group_by(HEWSR.cat,Matrix.cat)%>%
+  summarise(lambda=exp(log(r)%>%mean),
+            n=n(),
+            ss=sum(r>=1)/n)%>%
+  ggplot()+
+  geom_tile(aes(x=HEWSR.cat, y=Matrix.cat, fill=lambda))+
+  theme_ipsum()+
+    labs(x="High elevation disturbance (proportion)",
+       y="Matrix disturbance (proportion)")
+  
 ```

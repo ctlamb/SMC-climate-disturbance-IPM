@@ -9,6 +9,7 @@ library(tabularaster)
 library(googledrive)
 library(terra)
 library(units)
+library(broom.mixed)
 library(tidyverse)
 
 herds <- st_read(here::here("data/spatial/herds/ipm_herds.shp"))
@@ -24,7 +25,7 @@ ndvi.files <- tibble(path = list.files(here::here("data/spatial/ndvi/biweekly/av
   )
 
 ndvi.files.summer <- ndvi.files %>%
-  filter(monthweek %in% 702:801) ##use last week of july and first week of august
+  filter(monthweek %in% 702:801) ## use last week of july and first week of august
 
 herds.geo <- herds %>% st_transform(4326)
 summer.ndvi <- tibble()
@@ -32,29 +33,29 @@ summer.ndvi.herd <- tibble()
 for (i in 1:nrow(ndvi.files.summer)) {
   rast.i <- rast(here::here("data/spatial/ndvi/biweekly/avhrr", ndvi.files.summer$path[i])) %>%
     crop(herds.geo)
-  
+
   remove <- rast.i[[2]] %>%
     subst(0, 1) %>%
     subst(2:3, NA) %>%
     subst(65535, NA)
-  
+
   rast.clean <- rast.i[[1]] * remove
-  
+
   mean.i <- rast.clean %>%
     values() %>%
     mean(na.rm = TRUE)
-  
+
   summer.ndvi <- summer.ndvi %>%
     rbind(tibble(
       year = ndvi.files.summer$year[i],
       mean = mean.i
     ))
-  
+
   summer.ndvi.herd <- summer.ndvi.herd %>%
     rbind(terra::extract(rast.clean, herds.geo %>% vect(), bind = TRUE, fun = "mean", na.rm = TRUE) %>%
-            data.frame() %>%
-            mutate(year = ndvi.files.summer$year[i]) %>%
-            select(herd, year, ECCC, ndvi = 10))
+      data.frame() %>%
+      mutate(year = ndvi.files.summer$year[i]) %>%
+      select(herd, year, ECCC, ndvi = 10))
 }
 
 plot(summer.ndvi$year, summer.ndvi$mean)
@@ -96,8 +97,8 @@ ggplot(
 library(lme4)
 
 lmer(mean ~ year + (1 + year | herd), REML = F, data = summer.ndvi.herd %>%
-       group_by(herd, year, ECCC) %>%
-       summarise(mean = mean(ndvi) / 1000)) %>%
+  group_by(herd, year, ECCC) %>%
+  summarise(mean = mean(ndvi) / 1000)) %>%
   ranef() %>%
   data.frame()
 
@@ -167,24 +168,24 @@ summer.ndvi.herd %>%
 covars <- read_csv("/Users/claytonlamb/Dropbox/Documents/University/Work/WSC/SMC-climate-disturbance-IPM/data/spatial/covariates_addPCA.csv") %>% left_join(summer.ndvi.herd %>% distinct(herd, ECCC))
 
 
-covars %>%
-  filter(year > 1985) %>%
-  nest(data = c(-ECCC)) %>%
-  mutate(
-    fit = map(data, ~ lmer(earlyseral ~ year + (1 + year | herd) + (1 | herd), data = .x)),
-    tidied = map(fit, tidy)
-  ) %>%
-  unnest(tidied) %>%
-  select(-data, -fit) %>%
-  filter(term == "year")
-
-ggplot(
-  covars %>% filter(year > 1985),
-  aes(x = year, y = earlyseral, group = ECCC, color = ECCC)
-) +
-  geom_point() +
-  geom_path() +
-  geom_smooth(size = 3, se = FALSE)
+# covars %>%
+#   filter(year > 1985) %>%
+#   nest(data = c(-ECCC)) %>%
+#   mutate(
+#     fit = map(data, ~ lmer(earlyseral ~ year + (1 + year | herd) + (1 | herd), data = .x)),
+#     tidied = map(fit, tidy)
+#   ) %>%
+#   unnest(tidied) %>%
+#   select(-data, -fit) %>%
+#   filter(term == "year")
+#
+# ggplot(
+#   covars %>% filter(year > 1985),
+#   aes(x = year, y = earlyseral, group = ECCC, color = ECCC)
+# ) +
+#   geom_point() +
+#   geom_path() +
+#   geom_smooth(size = 3, se = FALSE)
 
 
 
@@ -195,47 +196,48 @@ herds.utm <- herds %>% st_transform(26911)
 summer.evi <- tibble()
 summer.evi.herd <- tibble()
 
-### mask out disturbed pixels
 m <- c(
-  0, 0.5, 1,
-  0.5, 3, NA
+  0, 0.2, NA,
+  0.2, 2, 1
 )
 rclmat <- matrix(m, ncol = 3, byrow = TRUE)
-no.dist <- (rast("/Users/claytonlamb/Dropbox/Documents/University/Work/WSC/SMC-climate-disturbance-IPM/data/spatial/disturbance/hum/2020_hum.tif") +
-              rast("/Users/claytonlamb/Dropbox/Documents/University/Work/WSC/SMC-climate-disturbance-IPM/data/spatial/disturbance/hum/2000_hum.tif")) %>%
-  classify(rclmat, include.lowest = TRUE) %>%
-  project(rast(here::here("data/spatial/EVI/clean/modis_evi", evi.files$path[1])))
+### mask out disturbed pixels
+dist <- rast(here::here("data/spatial/disturbance/2023-11-23_unbuffered/dist.all.unbuffered.tif")) %>%
+  project(rast(here::here("data/spatial/EVI/clean/modis_evi", evi.files$path[1])))%>%
+  classify(rclmat, include.lowest = TRUE)
 
 m <- c(
   1, 1, NA,
   NA, NA, 1
 )
 rclmat <- matrix(m, ncol = 3, byrow = TRUE)
-dist <- no.dist %>% classify(rclmat, include.lowest = TRUE)
-
+no.dist <-  dist%>% classify(rclmat, include.lowest = TRUE)
 
 
 for (i in 1:nrow(evi.files)) {
   rast.clean <- rast(here::here("data/spatial/EVI/clean/modis_evi", evi.files$path[i]))
-  
+
   mean.i <- rast.clean %>%
     values() %>%
     mean(na.rm = TRUE)
-  
+
   summer.evi <- summer.evi %>%
     rbind(tibble(
       year = evi.files$year[i],
       mean = mean.i
     ))
-  
+
   rast.stack <- c(rast.clean, rast.clean * no.dist, rast.clean * dist)
   names(rast.stack) <- c("evi", "evi.nodist", "evi.dist")
-  
+
   summer.evi.herd <- summer.evi.herd %>%
     rbind(terra::extract(rast.stack, herds.utm %>% vect(), bind = TRUE, fun = "mean", na.rm = TRUE) %>%
-            data.frame() %>%
-            mutate(year = evi.files$year[i]) %>%
-            select(herd, year, ECCC, evi, evi.nodist, evi.dist))
+      data.frame() %>%
+      mutate(year = evi.files$year[i]) %>%
+      select(herd, year, ECCC, evi, evi.nodist, evi.dist)%>%
+    cbind(terra::extract(rast.stack, herds.utm %>% vect(), bind = TRUE, fun = \(x) length(na.omit(x)) / length(x)) %>%
+      data.frame() %>%
+      select(evi.prop = evi, evi.nodist.prop = evi.nodist, evi.dist.prop = evi.dist)))
 }
 
 
@@ -257,10 +259,21 @@ ggplot(
   geom_path() +
   geom_smooth(aes(group = ECCC), se = FALSE)
 
+ggplot(
+  summer.evi.herd %>% pivot_longer(evi:evi.dist) %>% filter(name != "evi"),
+  aes(x = year, y = value, color = name)
+) +
+  geom_point() +
+  geom_path() +
+  geom_smooth(aes(group = name), se = FALSE, method = "lm") +
+  facet_wrap(vars(herd), scales = "free_y")
+
 summer.evi.herd %>%
+  mutate_at(vars(evi, evi.nodist,evi.dist), scale)%>%
+mutate(year=year-2001)%>%
   nest(data = c(-ECCC)) %>%
   mutate(
-    fit = map(data, ~ lmer(evi ~ year + (1 + year | herd) + (1 | herd), data = .x)),
+    fit = map(data, ~ lmer((evi/1000) ~ year + (1 + year | herd) + (1 | herd), data = .x)),
     tidied = map(fit, tidy)
   ) %>%
   unnest(tidied) %>%
@@ -268,20 +281,35 @@ summer.evi.herd %>%
   filter(term == "year")
 
 ## by dist
-summer.evi.herd %>%
+
+coefs.evi <- summer.evi.herd %>%
+  #mutate_at(vars(evi, evi.nodist,evi.dist), scale)%>%
+  mutate(year=year-2001)%>%
   pivot_longer(evi:evi.dist) %>%
   nest(data = c(-ECCC, -name)) %>%
   mutate(
-    fit = map(data, ~ lmer(value ~ year + (1 + year | herd), data = .x)),
+    fit = map(data, ~ lmer((value/1000) ~ year + (1 +year | herd), data = .x,control = lmerControl(optimizer ="Nelder_Mead"))),
     tidied = map(fit, tidy)
   ) %>%
   unnest(tidied) %>%
   select(-data, -fit) %>%
-  filter(term == "year") %>%
-  ggplot(aes(y = ECCC, x = estimate, xmin = estimate - std.error, xmax = estimate + std.error, fill = name, color = name)) +
+  filter(term == "year")%>%
+  left_join(summer.evi.herd %>%
+              pivot_longer(evi.prop:evi.dist.prop)%>%
+              group_by(ECCC,name)%>%
+              summarise(prop=mean(value))%>%
+              mutate(name=str_sub(name,1,-6)),
+            by=c("ECCC","name"))%>%
+  mutate(estimate.prop=estimate*prop,
+         std.error.prop=std.error*prop)
+
+
+  ggplot(coefs.evi,aes(y = ECCC, x = estimate.prop, xmin = estimate.prop - std.error.prop, xmax = estimate.prop + std.error.prop, fill = name, color = name)) +
   geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_text(aes(y = ECCC, x = estimate.prop, label=prop%>%round(2)),vjust=2,position = position_dodge(width = 0.4)) +
   geom_linerange(position = position_dodge(width = 0.4)) +
-  geom_point(position = position_dodge(width = 0.4))
+  geom_point(position = position_dodge(width = 0.4))+
+    labs(x="Annual change in EVI", color="Type", fill="Type")
 
 
 ggplot(

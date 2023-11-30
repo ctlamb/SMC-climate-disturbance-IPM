@@ -33,15 +33,20 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 
 	
 # Linear predictors for survival and recruitment
+# survival covars get yr-1 because survival is start of year. survival during April 2022-March 2023 is assigned year 2022. Covars are already yr+1 so that March 2023 counts and R correspond to 2022 covariates.
 	for(h in 1:nherd){
-		for(yr in 1:nyr){
+	
+	logit(s.daily[h,1]) <-muS
+	logit(R[h,1]) <- muR
+	
+		for(yr in 2:nyr){
 			
 			logit(s.daily[h,yr]) <- muS + # intercept (baseline survival)
-				beta.dist.s*dist[h,yr]+
-								beta.snow.depth.s*snow.depth[h,yr] + 
-												beta.start.spring.s*start.spring[h,yr]+
-												    beta.warm.dry.summer.s*warm.dry.summer[h,yr]+
-												        beta.rain.on.snow.s*rain.on.snow[h,yr]
+				beta.dist.s*dist[h,yr-1]+ 
+								beta.snow.depth.s*snow.depth[h,yr-1] + 
+												beta.start.spring.s*start.spring[h,yr-1]+
+												    beta.warm.dry.summer.s*warm.dry.summer[h,yr-1]+
+												        beta.rain.on.snow.s*rain.on.snow[h,yr-1]
 				
 			logit(R[h,yr]) <- muR + # intercept (baseline recruitment) 
 				offset*month_offset[h,yr]  +
@@ -56,6 +61,7 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 
 			}
 			}
+
 
 
 # s.daily to annual survival
@@ -107,7 +113,7 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 		#R.ad[h,first[h]] <- 0.1
 		R_adj[h,first[h]] <- 0.1
 		
-		adj_totNMF[h,first[h]] <- totNMF[h,first[h]]
+		adj_totN[h,first[h]] <- totN[h,first[h]]
 		
 		adj_N1[h,first[h]] <- N[h,first[h],1]
 		adj_N2[h,first[h]] <- N[h,first[h],2]
@@ -142,11 +148,11 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 		#R.ad[h,yr] <- ifelse(adj_N2[h,yr-1]<5, 0, adj_N1[h,yr] /(adj_N2[h,yr-1] * S[h,yr-1]))
 		logit(R_adj[h,yr]) <- logit(R[h,yr]) - offset*month_offset[h,yr]
 		
-		# Adjust totNMF for very small population 
-		adj_totNMF[h,yr] <- ifelse(totNMF[h,yr]<1, 0, totNMF[h,yr])
+		# Adjust totN for very small population 
+		adj_totN[h,yr] <- ifelse(totN[h,yr]<1, 0, totN[h,yr])
 	
 		# Lambda
-		lambda[h,yr] <- (adj_totNMF[h,yr] + 0.001)/abs(adj_totNMF[h,yr-1] + 0.001)
+		lambda[h,yr] <- (adj_totN[h,yr] + 0.001)/abs(adj_totN[h,yr-1] + 0.001)
 		}
 	}
 		

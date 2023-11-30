@@ -191,7 +191,8 @@ for(h in 1:nherd){
 
 meansr <- array(NA, c(1,2))
 meansr[1,1] <- sexratio_summary[1,1]
-meansr[1,2] <- 1/(sexratio_summary[1,2]^2)
+#meansr[1,2] <- 1/(sexratio_summary[1,2]^2)
+meansr[1,2] <- 10000 ##make sex ratio more precise so model doesnt eat variance up here
 
 ##first year of data (legacy...set at 1 so all herds start at year 1 now)
 first <- rep(1,nherd)
@@ -285,7 +286,7 @@ ipm_inits <- function(){
 #  Model parameters to monitor
 model_parms <- c(
   
-  "totNMF", "lambda",
+  "totNMF", "totN", "lambda",
   
   "S", "R",  "R_adj", 
   #"R.ad",
@@ -373,3 +374,64 @@ draws%>%
   facet_wrap(vars(.variable))+
   geom_vline(xintercept = 0, linetype="dashed")
 ```
+```{r plot Nakusp for Nowak, results='hide', message=FALSE, warning=FALSE}
+df.temp <- rbind(edat%>%mutate(type="count", se=sqrt(1/tau))%>%select(herd,year,mu,se,type),
+      sdat%>%mutate(mu=(1-(events/trials))^365,se=sqrt((mu*(1-mu))/(trials/365)),type="S")%>%select(herd,year,mu,se,type),
+      rdat%>%mutate(mu=events/trials,se=sqrt((mu*(1-mu))/trials),type="R")%>%select(herd,year,mu,se,type))%>%
+  filter(herd=="23")
+
+
+ipm.temp <- demog%>%
+  filter(i==23)%>%
+  mutate(type="R")%>%
+  select(herd,year=yrs,mu=R, lower=R.lower, upper=R.upper, type)%>%
+  rbind(demog%>%
+  filter(i==23)%>%
+  mutate(type="S")%>%
+  select(herd,year=yrs,mu=S, lower=S.lower, upper=S.upper, type))%>%
+  rbind(demog%>%
+  filter(i==23)%>%
+  mutate(type="count")%>%
+  select(herd,year=yrs,mu=totNMF, lower=totNMF.lower, upper=totNMF.upper, type))%>%
+  rbind(demog%>%
+  filter(i==23)%>%
+  mutate(type="lambda")%>%
+  select(herd,year=yrs,mu=lambda, lower=lambda.lower, upper=lambda.upper, type))
+
+
+  ggplot()+
+  geom_linerange(data=df.temp, aes(x=year+1969, y=mu, ymin=mu-se, ymax=mu+se))+
+  geom_point(data=df.temp, aes(x=year+1969, y=mu, ymin=mu-se, ymax=mu+se))+
+  geom_linerange(data=ipm.temp, aes(x=year, y=mu, ymin=lower, ymax=upper), color="orange")+
+  geom_point(data=ipm.temp, aes(x=year, y=mu,  ymin=lower, ymax=upper), color="orange")+
+  facet_wrap(vars(type), scales="free_y")+
+  labs(x="Year")
+  
+  
+
+
+covariates%>%
+  filter(year>1970, herd=="Nakusp")%>%
+  select(herd,year,dist.hum, snow.depth, start.spring, warm.dry.summer, rain.on.snow)%>%
+  pivot_longer(dist.hum:rain.on.snow)%>%
+  ggplot(aes(x=year,y=value))+
+  geom_point()+
+  geom_path()+
+  facet_wrap(vars(name), scales="free_y")
+
+
+
+library(corrr)
+df.temp%>%
+  select(year,mu,type)%>%
+  pivot_wider(values_from=mu, names_from=type)%>%
+  select(-year)%>%
+  correlate()
+
+ipm.temp%>%
+  select(year,mu,type)%>%
+  pivot_wider(values_from=mu, names_from=type)%>%
+  select(-year)%>%
+  correlate()
+```
+

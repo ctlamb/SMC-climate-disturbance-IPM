@@ -26,33 +26,42 @@ library(tidyverse)
 
 hd <- read.csv(here::here("data/clean/blueprint.csv"))
 hn <- hd %>%
-  dplyr::select(herd, herd_num)
+  dplyr::select(herd, herd_num)%>%
+  filter(herd!="Quintette Full")
 sgt <- read.csv(here::here("data/clean/herd_sightability.csv")) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 afs <- read.csv(here::here("data/clean/survival.csv")) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 afr <- read.csv(here::here("data/clean/recruitment.csv")) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 recruit.yr <-read.csv(here::here("data/clean/recruitment_counts.csv")) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 counts <- read.csv(here::here("data/clean/counts.csv")) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 trt <- read.csv(here::here("data/clean/treatments.csv")) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 
 sexratios <- read.csv(here::here("data/clean/sexratios.csv")) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 sexratio_summary <- read.csv(here::here("data/clean/sexratio_summary.csv"))
 surv.yr <- read_csv(here::here("data/clean/survival_yrly.csv"))%>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 
 covariates <- read.csv(here::here("data/spatial/covariates_simplified.csv")) %>%
   mutate(herd = case_when(
@@ -60,12 +69,14 @@ covariates <- read.csv(here::here("data/spatial/covariates_simplified.csv")) %>%
     TRUE ~ herd
   )) %>%
   arrange(herd) %>%
-  left_join(hn, by = "herd")
+  left_join(hn, by = "herd")%>%
+  filter(herd!="Quintette Full")
 
 
 ```
 
-## Line up years so that it all affects animals by March year X count. So summer and spring need to be X+1
+## Line up years so that it all affects animals by March year X count. So summer and spring need to be X+1, and then all need -1
+## shift all non-winrer covars to following year so that now winter 2023 covariates affect 2023 counts and R, but 2023 summer, spring, and disturbance of interest affect 2024 count.
 ```{r filter recovery actions, results='hide', message=FALSE, warning=FALSE}
 
 covar.names <- covariates%>%select(-herd,-year,-herd_num,-ECCC)%>%colnames ##remove herd and year
@@ -75,7 +86,7 @@ covar.names_scaled <- paste0(covar.names,"_scale")
 covariates <- covariates%>%
   pivot_longer(covar.names)%>%
   mutate(year=case_when(name%in%c("snow.depth","cooler.winter","rain.on.snow")~year,
-                   TRUE~year+1))%>%
+                   TRUE~year+1))%>% ## winter happens before the annual March counts each year so it lines up, rest need to go to next year to match up
   pivot_wider()
 ```
   
@@ -112,7 +123,7 @@ afs <- afs %>%
     !(herd %in% "South Selkirks" & year %in% c(1987:1989) - 1),
     !(herd %in% "Purcell South" & year %in% c(2012:2013) - 1)
   ) %>%
-  filter(year %in% yrs_keep)
+  filter(year %in% (yrs_keep-1))
 
 afr <- afr %>%
   left_join(treatment.combos, by = c("herd", "year")) %>%
@@ -160,7 +171,7 @@ surv.yr <- surv.yr%>%
     !(herd %in% "South Selkirks" & year %in% c(1987:1989)),
     !(herd %in% "Purcell South" & year %in% c(2012:2013))
   ) %>%
-  filter(year %in% yrs_keep)
+  filter(year %in% (yrs_keep-1))
 
 recruit.yr <- recruit.yr%>%
   left_join(treatment.combos, by=c("herd","year"))%>%
@@ -281,7 +292,7 @@ nr <- nrow(recruit.yr.ipm)
 
 surv.yr.priors <-surv.yr%>%
   left_join(yr_df, by = c("year" = "yrs"))%>%
-     left_join(covariates%>%select(herd,year,!!covar.names_scaled), by=c("herd", "year"))%>%
+     left_join(covariates%>%select(herd,year,!!covar.names_scaled)%>%mutate(year=year-1), by=c("herd", "year"))%>% ##S is start of year. In covar, 2023 is what happened over past year, so corresponds to actually S 2022.
   select(herd=herd_num,year=yr_idx,event,time,!!covar.names_scaled)
 
 surv.yr.ipm <- surv.yr.priors%>%
@@ -501,10 +512,6 @@ srdat <- sexratios %>%
 
 nsr <- nrow(srdat)
 
-meansr <- array(NA, c(1, 2))
-meansr[1, 1] <- sexratio_summary[1, 1]
-meansr[1, 2] <- 1 / (sexratio_summary[1, 2]^2)
-
 
 first <- rep(1, nherd)
 
@@ -554,11 +561,10 @@ single.params <- tibble(
 ```{r S for JW, results='hide', message=FALSE, warning=FALSE}
 
 # Takes a data.frame 'df' with columns c('id','start','end','dead')
-
-
 ## transform into daily survival
 source(here::here("other", "seasonalsurvival_fn.r"))
 surv.day <- surv.yr%>%
+  mutate(id=paste(id, herd, sep="_"))%>%
   filter(time>0)%>%
   dplyr::select(id, herd, DateEntry.bio=enter.date, DateExit.bio=exit.date, event) %>%
   mutate(id_period = paste0(id, DateEntry.bio)) %>%
@@ -576,11 +582,12 @@ surv.day.wide <- surv.day%>%
 
 
 ```
+
 ## Join S and R to covariates for data exploration
 ```{r join SR, results='hide', message=FALSE, warning=FALSE}
 sdat.plot <- read_csv(here::here("data/clean/survival.csv"))%>%
   left_join(covariates%>%
-              mutate(year=year)%>% ##this should probably be year-1 but don't have enough covar data
+              mutate(year=year-1)%>%
               select(herd,year,!!covar.names, !!covar.names_scaled),
             by=c("herd","year"))%>%
   pivot_longer(c(covar.names, covar.names_scaled))%>%
@@ -611,7 +618,7 @@ write_csv(surv.yr.ipm, here::here("data/clean/forIPM/surv.yr.ipm.csv"))
 write_csv(recruit.yr.priors, here::here("data/clean/forIPM/recruit.yr.priors.csv"))
 write_csv(recruit.yr.ipm, here::here("data/clean/forIPM/recruit.yr.ipm.csv"))
 write_csv(counts, here::here("data/clean/forIPM/counts.csv"))
-write_csv(surv.day.wide, here::here("data/clean/forIPM/surv.day.wide.csv"))
+write_csv(surv.day.wide, here::here("data/clean/forIPM/surv.day.wide.unique.csv"))
 
 ## covariates
 write_csv(covariates, here::here("data/clean/forIPM/covariates_scaled.csv"))
