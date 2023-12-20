@@ -1,5 +1,5 @@
 ---
-title: "Asses pop trends with Climarte-Disturbance model"
+title: "Asses pop trends with Climate-Disturbance IPM"
 author: "Clayton T. Lamb"
 date: '`r format(Sys.time(), "%d %B, %Y")`'
 output: github_document
@@ -11,18 +11,14 @@ output: github_document
 #                   output_file =  "README.md")
 
 knitr::purl(
-  input = here::here("scripts_r", "4.results_summary.Rmd"),
-  output = here::here("scripts_r", "4.results_summary.r")
+  input = here::here("scripts_r", "3.results_summary.Rmd"),
+  output = here::here("scripts_r", "3.results_summary.r")
 )
 ```
 
 
 ## Load Data
 ```{r Load packages and data, results='hide', message=FALSE, warning=FALSE}
-library(ggmap)
-library(raster)
-library(RStoolbox)
-library(ggsn)
 library(MCMCvis)
 library(tidybayes)
 library(ggmcmc)
@@ -39,12 +35,12 @@ library(ggrepel)
 library(tidylog)
 library(gt)
 library(patchwork)
-library(sf)
-library(mapview)
-library(basemaps)
 library(ggtext)
 library(rlang)
 library(tidyverse)
+
+##load helpers
+source(here::here("scripts_r/helpers/gg_theme_custom.R"))
 
 # Load data ---------------------------------------------------------------
 
@@ -69,10 +65,9 @@ trt <- read.csv(here::here("data/clean/treatments.csv")) %>%
   left_join(hn, by = "herd")
 covar.names <- readRDS(here::here("data/clean/forIPM/covariate_names.rds"))
 covariates <- read_csv(here::here("data/clean/forIPM/covariates_scaled.csv")) %>%
-  dplyr::select(herd, year, !!covar.names, !!paste0(covar.names,"_scale"))
+  dplyr::select(herd, year, !!covar.names, !!paste0(covar.names, "_scale"))
 # covariates_scaled <- read_csv(here::here("data/clean/forIPM/covariates_scaled.csv")) %>%
 #   dplyr::select(herd, year, !!paste0(covar.names,"_scale"))
-  
 
 labels <- read.csv(here::here("data/clean/labels.csv"))
 
@@ -82,38 +77,34 @@ yr_df <- read.csv(here::here("data/clean/forIPM/yr_df.csv"))
 
 
 ```{r Check posteriors, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, results='hide'}
-
 ## check posteriors for convergence
-mcmcplots::mcmcplot(out$samples, random=100, par = "lambda")
-#mcmcplots::mcmcplot(out$samples, random=100, par = c("sight_sd_yr_sg","sight_tau_yr_sg","sight_yr_sg"))
-mcmcplots::mcmcplot(out$samples, random=100, par = c("p_mu","p", "sight_est"))
+mcmcplots::mcmcplot(out$samples, random = 100, par = "lambda")
+# mcmcplots::mcmcplot(out$samples, random=100, par = c("sight_sd_yr_sg","sight_tau_yr_sg","sight_yr_sg"))
+mcmcplots::mcmcplot(out$samples, random = 100, par = c("p_mu", "p", "sight_est"))
 
-mcmcplots::mcmcplot(out$samples,random=100, par = "totNMF")
+mcmcplots::mcmcplot(out$samples, random = 50, par = "totNMF")
 
-mcmcplots::mcmcplot(out$samples,random=100, par = "S")
-mcmcplots::mcmcplot(out$samples,random=100, par = "R")
-mcmcplots::mcmcplot(out$samples,random=100, par = "sexratio")
+mcmcplots::mcmcplot(out$samples, random = 100, par = "S")
+mcmcplots::mcmcplot(out$samples, random = 100, par = "R")
+mcmcplots::mcmcplot(out$samples, random = 100, par = "sexratio")
 
-mcmcplots::mcmcplot(out$samples,random=100, par = c("beta.type.otc.r", "beta.type.osc.r", "beta.type.mnka.r"))
+mcmcplots::mcmcplot(out$samples, random = 100, par = c("beta.type.otc.r", "beta.type.osc.r", "beta.type.mnka.r"))
 
 
 mcmcplots::mcmcplot(out$samples, par = c(
- "muS", "muR", 
-  
+  "muS", "muR",
   "offset",
   "beta.dist.s",
   "beta.snow.depth.s",
   "beta.start.spring.s",
   "beta.warm.dry.summer.s",
   "beta.rain.on.snow.s",
-  
   "beta.dist.r",
   "beta.snow.depth.r",
   "beta.start.spring.r",
   "beta.warm.dry.summer.r",
   "beta.rain.on.snow.r"
 )) ## look good
-
 ```
 
 
@@ -129,7 +120,7 @@ hd <- hd %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwill
 counts <- counts %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
 afr <- afr %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
 afs <- afs %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
-
+covariates <- covariates %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
 
 # Pull out some values, summarize to demog data frame ---------------------
 
@@ -165,7 +156,7 @@ demog <- out %>%
 
 ## filter herds to a period where not fully extirpated
 extirpated.yr <- demog %>%
-  filter(round(totNMF, 0) == 0) %>%
+  filter(round(totNMF, 0) <= 1) %>%
   group_by(herd) %>%
   filter(yrs == min(yrs)) %>%
   ungroup()
@@ -232,23 +223,25 @@ ggplot(first.yr, aes(x = first.year)) +
   )
 
 
-##shift S to y+1
-s.shift <- demog%>%
-  mutate(year=yrs+1)%>%
-  select(herd,year,S, S.lower, S.upper)
-  
+## shift S to y+1 for correlations
+s.shift <- demog %>%
+  mutate(year = yrs + 1) %>%
+  select(herd, year, S, S.lower, S.upper)
+
 
 demog.mod <- demog %>%
   filter(totNMF > 20) %>% ## modelling data that doesn't include functionally extirpated herds, demography gets unstable
   rename(year = yrs) %>%
-  select(-S, -S.lower, -S.upper)%>%
-  left_join(s.shift, by=c("herd","year"))%>%
+  select(-S, -S.lower, -S.upper) %>%
+  left_join(s.shift, by = c("herd", "year")) %>%
   left_join(covariates, by = c("herd", "year")) %>% ## add covariates
   ## keep only IPM results for each herd after first yr
   left_join(first.yr, by = "herd") %>%
-  filter(year >= first.year)
+  filter(year > first.year,
+         lambda.upper-lambda.lower>0,
+         !is.na(S))
 
-  
+
 
 ggplot(demog, aes(y = log(lambda), x = totNMF)) +
   geom_point(alpha = 0.3) +
@@ -281,10 +274,8 @@ ggplot(demog, aes(y = sexratio, x = yrs)) +
   labs(
     x = "Year",
     y = "Sex ratio"
-  )+
+  ) +
   facet_wrap(vars(herd))
-  
-
 ```
 
 ## Plot herd abundance
@@ -342,7 +333,7 @@ ggplot() +
       left_join(labels, by = "herd") %>%
       mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(.f = ., .x = number_label, .fun = max)),
-    aes(x = yrs, y = totN, ymin = totN.lower, ymax = totN.upper), alpha = 0.4, color = NA, fill = cols[3]
+    aes(x = yrs, y = totNMF, ymin = totNMF.lower, ymax = totNMF.upper), alpha = 0.4, color = NA, fill = cols[3]
   ) +
   geom_line(
     data = demog %>%
@@ -350,7 +341,7 @@ ggplot() +
       left_join(labels, by = "herd") %>%
       mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(number_label)),
-    aes(x = yrs, y = totN, ymin = totN.lower, ymax = totN.upper), size = 1, color = cols[3]
+    aes(x = yrs, y = totNMF, ymin = totNMF.lower, ymax = totNMF.upper), size = 1, color = cols[3]
   ) +
   geom_rug(
     data = raw.demog %>%
@@ -385,20 +376,20 @@ ggplot() +
   geom_point(
     data = counts %>%
       ungroup() %>%
-      left_join(treatment.combos, by = c("herd","year"="yrs"))%>%
+      left_join(treatment.combos, by = c("herd", "year" = "yrs")) %>%
       left_join(labels, by = "herd") %>%
       mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(number_label)),
-    aes(x = year, y = Est_CL, color=!is.na(trt), fill=!is.na(trt)), size = 0.5, alpha = 0.7
+    aes(x = year, y = Est_CL, color = !is.na(trt), fill = !is.na(trt)), size = 0.5, alpha = 0.7
   ) +
   geom_linerange(
     data = counts %>%
       ungroup() %>%
-      left_join(treatment.combos, by = c("herd","year"="yrs"))%>%
+      left_join(treatment.combos, by = c("herd", "year" = "yrs")) %>%
       mutate(Est_CL.max = case_when(Est_CL.max > 5000 ~ 5000, TRUE ~ Est_CL.max)) %>%
       left_join(labels, by = "herd") %>% mutate(herd = paste0(number_label, ".", herd, " (", human, "%)") %>%
         fct_reorder(number_label)),
-    aes(x = year, ymin = Est_CL.min, ymax = Est_CL.max, color=!is.na(trt)), alpha = 0.5
+    aes(x = year, ymin = Est_CL.min, ymax = Est_CL.max, color = !is.na(trt)), alpha = 0.5
   ) +
   geom_point(
     data = trt.plot %>%
@@ -428,28 +419,38 @@ ggsave(here::here("plots", "abundance.png"), width = 15, height = 11, bg = "whit
 
 ## Plot draws
 ```{r plot draws, results='hide', message=FALSE, warning=FALSE}
-out %>%
+plot.draws <- out %>%
   gather_draws(
-    beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
-    beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r
+    beta.dist.s, beta.snow.depth.s, beta.cooler.winter.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+    beta.dist.r, beta.snow.depth.r, beta.cooler.winter.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r
   ) %>%
-  median_qi() %>%
   mutate(
-    type = str_sub(.variable, -1, -1),
+    type = str_sub(.variable, -1, -1)%>%str_to_upper(),
     var = str_sub(.variable, 6, -2)
   ) %>%
-  select(var, .value, .lower, .upper, type) %>%
-  ggplot(aes(x = .value, xmin = .lower, xmax = .upper, color = type, y = var)) +
-  geom_linerange(alpha = 0.8, position = position_dodge(width = 0.3)) +
-  geom_point(position = position_dodge(width = 0.3)) +
-  geom_vline(xintercept = 0, linetype = "dashed")
+  select(var, .value, type)%>%
+  mutate(var=case_when(var=="dist."~"disturbance",
+                       TRUE~str_replace(var,"."," ")))
 
-## add lambda (temporary)
 
-## 
+plot.draws%>%
+  group_by(var)%>%
+  mutate(median=median(.value))%>% ##for ordering
+ggplot(aes(x = .value, color = type, fill=type, y = fct_reorder(var, median))) +
+  geom_density_ridges(alpha=0.4,rel_min_height = 0.01) +
+  geom_vline(xintercept = 0, linetype = "dashed")+
+  theme.custom+
+  theme(legend.position = c(0.2,1),legend.direction="horizontal")+
+  labs(x = "Estimate (standardized)", y = "Covariate", color = "Vital rate", fill = "Vital rate")
+```
+
+```{r add lambda, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, results='hide'}
+## add lambda
+
+##
 demog.draws <- out %>%
   spread_draws(
-    c(totNMF,lambda)[i, j],
+    c(totNMF, lambda, S)[i, j],
     ndraws = ndraws
   ) %>%
   left_join(yr_df %>% rename(j = yr_idx), by = "j") %>%
@@ -462,39 +463,32 @@ demog.draws <- out %>%
   left_join(covariates, by = c("herd", "year")) %>% ## add covariates
   ## keep only IPM results for each herd after first yr
   left_join(first.yr, by = "herd") %>%
-  filter(year >= first.year)%>%
-  ungroup
+  filter(year >= first.year) %>%
+  ungroup()
 
-
-lambda.mod <- demog.draws %>%
-  group_by(.draw) %>%
-  do(tidy(glm(log(lambda) ~ dist.hum_scale + snow.depth_scale + start.spring_scale + warm.dry.summer_scale + rain.on.snow_scale, data =.))) %>%
-  filter(!term %in% "(Intercept)")%>%
-  group_by(term)%>%
-  summarise(.value=median(estimate),
-            .lower=(quantile(estimate,0.025)),
-            .upper=(quantile(estimate,0.975)))%>%
-  mutate(var=case_when(term=="dist.hum_scale"~"dist",
-                       TRUE~str_remove(term,"_scale")),
-         type="lambda")%>%
-  select(var, .value, .lower, .upper, type)
 
 
 lambda.mod.mm <- demog.draws %>%
   group_by(.draw) %>%
-  do(tidy(lmer(log(lambda) ~ dist.hum_scale + snow.depth_scale + start.spring_scale + warm.dry.summer_scale + rain.on.snow_scale + (1|herd), data =.))) %>%
-  filter(!(term %in% "(Intercept)" | effect!="fixed"))%>%
-  group_by(term)%>%
-  summarise(.value=median(estimate),
-            .lower=(quantile(estimate,0.025)),
-            .upper=(quantile(estimate,0.975)))%>%
-  mutate(var=case_when(term=="dist.hum_scale"~"dist",
-                       TRUE~str_remove(term,"_scale")),
-         type="lambda")%>%
+  do(tidy(lmer(log(lambda) ~ dist.hum.es_scale + snow.depth_scale + start.spring_scale + warm.dry.summer_scale + rain.on.snow_scale + (1 | herd), data = .))) %>%
+  filter(!(term %in% "(Intercept)" | effect != "fixed")) %>%
+  group_by(term) %>%
+  summarise(
+    .value = median(estimate),
+    .lower = (quantile(estimate, 0.025)),
+    .upper = (quantile(estimate, 0.975))
+  ) %>%
+  mutate(
+    var = case_when(
+      term == "dist.hum.es_scale" ~ "dist",
+      TRUE ~ str_remove(term, "_scale")
+    ),
+    type = "lambda"
+  ) %>%
   select(var, .value, .lower, .upper, type)
 
 
-# 
+#
 # yr.bin <- 1
 # mod.dat <- demog.mod %>%
 #   filter(trt == "Reference") %>%
@@ -504,18 +498,16 @@ lambda.mod.mm <- demog.draws %>%
 #     r = mean(log(lambda), na.rm = TRUE),
 #     S = mean(log(S), na.rm = TRUE)%>%exp(),
 #     R = mean(log(R), na.rm = TRUE)%>%exp(),
-#     dist = mean(dist.hum_scale, na.rm = TRUE),
+#     dist = mean(dist.hum.es_scale, na.rm = TRUE),
 #     snow.depth = mean(snow.depth_scale, na.rm = TRUE),
 #     start.spring = mean(start.spring_scale, na.rm = TRUE),
 #     warm.dry.summer = mean(warm.dry.summer_scale, na.rm = TRUE),
 #     rain.on.snow = mean(rain.on.snow_scale, na.rm = TRUE)
 #   ) %>%
 #   ungroup()
-# 
+#
 # glm(r ~ dist + snow.depth + start.spring + warm.dry.summer + rain.on.snow, data = mod.dat)%>%
 #   tidy()
-
-
 
 out %>%
   gather_draws(
@@ -528,48 +520,38 @@ out %>%
     var = str_sub(.variable, 6, -3)
   ) %>%
   select(var, .value, .lower, .upper, type) %>%
-  rbind(lambda.mod.mm)%>%
+  rbind(lambda.mod.mm) %>%
   ggplot(aes(x = .value, xmin = .lower, xmax = .upper, color = type, y = var)) +
   geom_linerange(alpha = 0.8, position = position_dodge(width = 0.3)) +
   geom_point(position = position_dodge(width = 0.3)) +
-  geom_vline(xintercept = 0, linetype = "dashed")+
-  labs(x="Estimate (standardized)", y="Covariate", color="Demographic rate")
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Estimate (standardized)", y = "Covariate", color = "Demographic rate")
 ```
 
 ```{r explore lambda relationships, fig.height=11, fig.width=15, message=FALSE}
-
 cor(demog.mod$lambda, demog.mod$R)
 cor(demog.mod$lambda, demog.mod$S)
 cor(demog.mod$R, demog.mod$S)
 
-plot(demog.mod$S,demog.mod$lambda)
-plot(demog.mod$R,demog.mod$lambda)
-plot(demog.mod$R,demog.mod$S)
+plot(demog.mod$S, demog.mod$lambda)
+plot(demog.mod$R, demog.mod$lambda)
+plot(demog.mod$R, demog.mod$S)
 
 plot(demog$S, demog$lambda)
 
 
-lmer(lambda~S + (1|herd), data=demog.mod)%>%summary()
-lmer(lambda~R + (1|herd), data=demog.mod)%>%summary()
-
-cor(mod.dat$r, mod.dat$R)
-cor(mod.dat$r, mod.dat$S)
-
-plot(mod.dat$R, mod.dat$r)
-plot(mod.dat$S, mod.dat$r)
-
-lmer(r~S + (1+S|herd), data=mod.dat)%>%summary()
-lmer(r~R + (1+r|herd), data=mod.dat)%>%summary()
+lmer(lambda ~ S + (1 | herd), data = demog.mod) %>% summary()
+lmer(lambda ~ R + (1 | herd), data = demog.mod) %>% summary()
 
 
-ggplot(demog.mod, aes(x=S, y=lambda, group=herd, color=herd))+
-  geom_point()+
-  geom_smooth(method="lm",se=FALSE)+
+ggplot(demog.mod, aes(x = S, y = lambda, group = herd, color = herd)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
   theme(legend.position = "none")
 
-ggplot(demog.mod, aes(x=R, y=lambda, group=herd, color=herd))+
-  geom_point()+
-  geom_smooth(method="lm",se=FALSE)+
+ggplot(demog.mod, aes(x = R, y = lambda, group = herd, color = herd)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
   theme(legend.position = "none")
 
 plot.dat <- demog.mod %>%
@@ -589,14 +571,14 @@ plot.dat <- demog.mod %>%
 
 plot.dat %>%
   filter(trt == "Reference") %>%
-  ggplot(aes(x = dist.hum, y = lambda)) +
+  ggplot(aes(x = dist.hum.es, y = lambda)) +
   geom_point() +
   geom_hline(yintercept = 1, linetype = "dashed") +
   geom_smooth()
 
 plot.dat %>%
   filter(trt == "Reference") %>%
-  ggplot(aes(x = dist.hum, y = lambda_5)) +
+  ggplot(aes(x = dist.hum.es, y = lambda_5)) +
   geom_point() +
   geom_hline(yintercept = 1, linetype = "dashed") +
   geom_smooth()
@@ -606,20 +588,19 @@ plot.dat %>%
 library(mgcv)
 m1 <- mgcv::gam(
   lambda_3 ~
-    # s(snow.depth)+
+    s(snow.depth) +
     s(start.spring) +
-    # s(warm.dry.summer) +
-    # s(rain.on.snow) +
-    s(dist.hum, k = 5) +
+    s(warm.dry.summer) +
+    s(rain.on.snow) +
+    s(dist.hum.es, k = 5) +
 
     s(herd, bs = "re") +
 
-    # s(snow.depth, herd, bs="re") +
-    # s(warm.dry.summer, herd, bs="re")+
-    s(dist.hum, herd, bs = "re") +
-    s(start.spring, herd, bs = "re")
-  # s(rain.on.snow, herd, bs="re")
-  ,
+    s(snow.depth, herd, bs = "re") +
+    s(warm.dry.summer, herd, bs = "re") +
+    s(dist.hum.es, herd, bs = "re") +
+    s(start.spring, herd, bs = "re") +
+    s(rain.on.snow, herd, bs = "re"),
   data = plot.dat
 )
 
@@ -630,22 +611,21 @@ plot(m1, page = 1, scheme = 2)
 
 m1 <- mgcv::gam(
   totNMF ~
-    # s(snow.depth)+
+    s(snow.depth) +
     s(start.spring) +
-    # s(warm.dry.summer) +
-    # s(rain.on.snow) +
-    s(dist.hum, k = 5) +
+    s(warm.dry.summer) +
+    s(rain.on.snow) +
+    s(dist.hum.es, k = 5) +
 
     s(herd, bs = "re") +
 
-    # s(snow.depth, herd, bs="re") +
-    # s(warm.dry.summer, herd, bs="re")+
-    s(dist.hum, herd, bs = "re") +
-    s(start.spring, herd, bs = "re")
-  # s(rain.on.snow, herd, bs="re")
-  ,
+    s(snow.depth, herd, bs = "re") +
+    s(warm.dry.summer, herd, bs = "re") +
+    s(dist.hum.es, herd, bs = "re") +
+    s(start.spring, herd, bs = "re") +
+    s(rain.on.snow, herd, bs = "re"),
+  # data = plot.dat
   data = plot.dat %>% filter(!herd %in% c("Takla", "Itcha-Ilgachuz"))
-  # data = plot.dat%>%filter(!herd%in%c("Takla"))
 )
 
 
@@ -661,112 +641,449 @@ plot(m1, page = 1, scheme = 2)
 ## add lambda (temporary)
 yr.bin <- 10
 mod.dat <- demog.mod %>%
-  filter(trt == "Reference")%>%
+  filter(trt == "Reference") %>%
   group_by(herd, year = ceiling(year / yr.bin) * yr.bin) %>%
   summarize(
     year = paste(first(year) - yr.bin, first(year), sep = "-"),
     r = mean(log(lambda), na.rm = TRUE),
-    dist = mean(dist.hum, na.rm = TRUE),
+    S = mean(S, na.rm = TRUE),
+    R = mean(R, na.rm = TRUE),
+    dist = mean(dist.hum.es, na.rm = TRUE),
     dist.all = mean(dist.all, na.rm = TRUE),
     snow.depth = mean(snow.depth, na.rm = TRUE),
     start.spring = mean(start.spring, na.rm = TRUE),
     warm.dry.summer = mean(warm.dry.summer, na.rm = TRUE),
     rain.on.snow = mean(rain.on.snow, na.rm = TRUE)
   ) %>%
-  ungroup()%>%
-    filter(
-            #!herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau"),
-         r<0.2,
-         r>(-0.2))
+  ungroup() %>%
+  filter(
+    # !herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau"),
+    r < 0.2,
+    r > (-0.2)
+  )
 
-ggplot(mod.dat, aes(x=dist, y=r))+
-  geom_point()+
-  geom_smooth(method="loess")+
-  geom_hline(yintercept=0, linetype="dashed")+
-  labs(x="Disturbance (proportion of herd area)",
-       y="Instantaneous growth rate")
+ggplot(mod.dat, aes(x = dist, y = r)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Disturbance (proportion of herd area)",
+    y = "Instantaneous growth rate"
+  )
+
+cor(mod.dat$r, mod.dat$R)
+cor(mod.dat$r, mod.dat$S)
+
+plot(mod.dat$R, mod.dat$r)
+plot(mod.dat$S, mod.dat$r)
+
+library(lme4)
+lmer(r ~ S + (1 + S | herd), data = mod.dat) %>% summary()
+lmer(r ~ R + (1 + R | herd), data = mod.dat) %>% summary()
 
 
+
+yr.bin <- 20
 mod.dat.ch <- demog.mod %>%
-  filter(trt == "Reference")%>%
-  select(herd,year,lambda, totNMF)%>%
-  left_join(read_csv(here::here("data/spatial/ch.dist.csv")), by=c("herd","year"))%>%
+  filter(trt == "Reference") %>%
+  select(herd, year, lambda, totNMF) %>%
+  left_join(read_csv(here::here("data/spatial/ch.dist.csv")) %>% mutate(herd = str_trim(herd)), by = c("herd", "year")) %>%
   group_by(herd, CH_type, year = ceiling(year / yr.bin) * yr.bin) %>%
   summarize(
     year = paste(first(year) - yr.bin, first(year), sep = "-"),
     r = exp(mean(log(lambda), na.rm = TRUE)),
-    N=min(totNMF, na.rm = TRUE),
-    dist = mean(dist.hum, na.rm = TRUE))%>%
-      filter(
-            #!herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau"),
-         r<1.2,
-         r>0.8)
-  
+    N = min(totNMF, na.rm = TRUE),
+    dist = mean(dist.hum.es, na.rm = TRUE)
+  ) %>%
+  filter(
+    # !herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau"),
+    r < 1.2,
+    r > 0.8
+  )
 
-  
 
-ggplot(mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist),
-       aes(x=HEWSR,y=`LEWSR/Matrix`))+
+
+
+
+
+ggplot(
+  mod.dat.ch %>% pivot_wider(names_from = "CH_type", values_from = dist),
+  aes(x = HEWSR, y = `LEWSR/Matrix`)
+) +
   geom_point()
 
 
-mod.dat.ch.50 <- mod.dat.ch%>%pivot_wider(names_from="CH_type", values_from=dist)%>%filter(N>50)
+mod.dat.ch.50 <- mod.dat.ch %>%
+  pivot_wider(names_from = "CH_type", values_from = dist) %>%
+  filter(N > 50, !herd %in% c("Maligne", "Tonquin", "Narraway AB")) ## no CH delineated
 
-ggplot(mod.dat.ch.50,
-       aes(x=HEWSR,y=`LEWSR/Matrix`, size=r>=1, color=r>=1))+
-  geom_point(alpha=0.4)
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r >= 1, color = r >= 1)
+) +
+  geom_point(alpha = 0.4)
 
-ggplot(mod.dat.ch.50,
-       aes(x=HEWSR,y=`LEWSR/Matrix`, size=r, color=r))+
-  geom_point(alpha=0.5)
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r, color = r)
+) +
+  geom_point(alpha = 0.5)
 
-ggplot(mod.dat.ch.50,
-       aes(x=HEWSR,y=`LEWSR/Matrix`, size=r>=1, color=r>=1))+
-   geom_rect(aes(xmin = 0-0.005, xmax = 0.05, ymin = 0-0.01, ymax = 0.25),
-               fill = "transparent", color = "grey", size = 1, linetype="dashed")+
-  geom_point(alpha=0.5)+
-  labs(x="High elevation disturbance (proportion)",
-       y="Matrix disturbance (proportion)",
-       size="Stable?",
-       color="Stable?")
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r >= 1, color = r >= 1)
+) +
+  geom_rect(aes(xmin = 0 - 0.005, xmax = 0.025, ymin = 0 - 0.01, ymax = 0.25),
+    fill = "transparent", color = "grey", size = 1, linetype = "dashed"
+  ) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)",
+    size = "Stable?",
+    color = "Stable?"
+  )
 
 
 
-ggplot(mod.dat.ch.50,
-       aes(x=HEWSR,y=`LEWSR/Matrix`, size=N, color=N))+
-  geom_point(alpha=0.4)
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = N, color = N)
+) +
+  geom_point(alpha = 0.4)
 
 
-mod.dat.ch.50%>%
-  filter(!herd%in%c("Maligne", "Tonquin"))%>% ##no CH delineated
-  ungroup%>%
-  mutate(HEWSR.cat=cut_width(HEWSR, 0.05),
-         Matrix.cat=cut_width(`LEWSR/Matrix`, 0.1)
-         )%>%
-  group_by(HEWSR.cat,Matrix.cat)%>%
-  summarise(lambda=exp(log(r)%>%mean),
-            n=n(),
-            ss=sum(r>=1)/n)%>%
-  ggplot()+
-  geom_tile(aes(x=HEWSR.cat, y=Matrix.cat, fill=ss))+
-  theme_ipsum()+
-    labs(x="High elevation disturbance (proportion)",
-       y="Matrix disturbance (proportion)")
+mod.dat.ch.50 %>%
+  ungroup() %>%
+  mutate(
+    HEWSR.cat = cut_width(HEWSR, 0.05),
+    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
+  ) %>%
+  group_by(HEWSR.cat, Matrix.cat) %>%
+  summarise(
+    lambda = exp(log(r) %>% mean()),
+    n = n(),
+    ss = sum(r >= 1) / n
+  ) %>%
+  ggplot() +
+  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = ss)) +
+  geom_text(aes(x = HEWSR.cat, y = Matrix.cat, label = n), color = "white") +
+  theme_ipsum() +
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)"
+  )
 
-mod.dat.ch.50%>%
-  filter(!herd%in%c("Maligne", "Tonquin"))%>% ##no CH delineated
-  ungroup%>%
-  mutate(HEWSR.cat=cut_width(HEWSR, 0.05),
-         Matrix.cat=cut_width(`LEWSR/Matrix`, 0.1)
-         )%>%
-  group_by(HEWSR.cat,Matrix.cat)%>%
-  summarise(lambda=exp(log(r)%>%mean),
-            n=n(),
-            ss=sum(r>=1)/n)%>%
-  ggplot()+
-  geom_tile(aes(x=HEWSR.cat, y=Matrix.cat, fill=lambda))+
-  theme_ipsum()+
-    labs(x="High elevation disturbance (proportion)",
-       y="Matrix disturbance (proportion)")
+mod.dat.ch.50 %>%
+  ungroup() %>%
+  mutate(
+    HEWSR.cat = cut_width(HEWSR, 0.1),
+    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
+  ) %>%
+  group_by(HEWSR.cat, Matrix.cat) %>%
+  summarise(
+    lambda = exp(log(r) %>% mean()),
+    n = n(),
+    ss.count = sum(r >= 0.99),
+    ss = ss.count / n
+  ) %>%
+  ggplot() +
+  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = ss)) +
+  geom_text(aes(x = HEWSR.cat, y = Matrix.cat, label = paste0(ss.count, "/", n)), color = "white") +
+  theme_ipsum() +
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)"
+  )
+
+mod.dat.ch.50 %>%
+  ungroup() %>%
+  mutate(
+    HEWSR.cat = cut_width(HEWSR, 0.05),
+    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
+  ) %>%
+  group_by(HEWSR.cat, Matrix.cat) %>%
+  summarise(
+    lambda = exp(log(r) %>% mean()),
+    n = n(),
+    ss = sum(r >= 1) / n
+  ) %>%
+  ggplot() +
+  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = lambda)) +
+  theme_ipsum() +
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)"
+  )
+```
+
+## Run simulations to assess C+D, D, C WITH ERROR
+```{r Run sims, results='hide', message=FALSE, warning=FALSE}
+ndraws <- 50
+
+
+## load individual covariates
+dist.hum <- readRDS(here::here("data/clean/forIPM/dist.hum.es.rds"))
+snow.depth <- readRDS(here::here("data/clean/forIPM/snow.depth.rds"))
+cooler.winter <- readRDS(here::here("data/clean/forIPM/cooler.winter.rds"))
+start.spring <- readRDS(here::here("data/clean/forIPM/start.spring.rds"))
+warm.dry.summer <- readRDS(here::here("data/clean/forIPM/warm.dry.summer.rds"))
+rain.on.snow <- readRDS(here::here("data/clean/forIPM/rain.on.snow.rds"))
+
+## fill 1970's covariate values for rain on snow
+early.fill <- rain.on.snow[, 11:16] %>%
+  rowwise() %>%
+  mutate(m = mean(`11`:`16`))
+rain.on.snow[, 1:10] <- early.fill$m
+
+nherd <- max(demog$i)
+nyr <- max(demog$j)
+
+ipm.LP.betas.draws <- out %>%
+  gather_draws(
+    muS, beta.dist.s, beta.snow.depth.s, beta.cooler.winter.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+    muR, beta.dist.r, beta.snow.depth.r, beta.cooler.winter.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r, beta.type.osc.r, beta.type.otc.r, beta.type.mnka.r, offset,
+    ndraws = ndraws
+  ) %>%
+  rename(median = .value) %>%
+  ungroup()
+sim.results <- tibble()
+
+draws <- unique(ipm.LP.betas.draws$.draw)
+
+for (draw in 1:length(draws)) {
+  ipm.LP.betas.i <- ipm.LP.betas.draws %>%
+    filter(.draw == draws[draw])
+
+  # format is	 [hd,yr,age,sim]
+  pred_N <- array(NA, c(nherd, nyr, 2, 3))
+
+  pred_totCalves <- array(NA, c(nherd, nyr, 1, 3))
+  pred_totAdults <- array(NA, c(nherd, nyr, 1, 3))
+  pred_totN <- array(NA, c(nherd, nyr, 1, 3))
+
+  pred_totCalvesMF <- array(NA, c(nherd, nyr, 1, 3))
+  pred_totAdultsMF <- array(NA, c(nherd, nyr, 1, 3))
+  pred_totNMF <- array(NA, c(nherd, nyr, 1, 3))
+
+  pred_s.daily <- array(NA, c(nherd, nyr, 1, 3))
+  pred_S <- array(NA, c(nherd, nyr, 1, 3))
+  pred_R <- array(NA, c(nherd, nyr, 1, 3))
+
+  ## turn covariates into array, 3, one for each sim
+  ## sim 1==climate + disturbance
+  ## sim 2==climate only
+  ## sim 3==disturbance only
+  yrs.baseline <- 11:20
+
+  dist.hum.array <- array(NA, dim = c(nherd, nyr, 3))
+  dist.hum.array[, , 1] <- dist.hum %>%
+    as.data.frame() %>%
+    unlist()
+  dist.hum.array[, , 2] <- rowMeans(dist.hum.array[, 1:2, 1])
+  dist.hum.array[, , 3] <- dist.hum.array[, , 1]
+
+  # dist.hum.array[, 51, 1] == dist.hum.array[, 51, 3]
+  # dist.hum.array[, 51, 1] != dist.hum.array[, 51, 2]
+
+  snow.depth.array <- array(NA, dim = c(nherd, nyr, 3))
+  snow.depth.array[, , 1] <- snow.depth %>%
+    as.data.frame() %>%
+    unlist()
+  snow.depth.array[, , 2] <- snow.depth.array[, , 1]
+  snow.depth.array[, , 3] <- rowMeans(snow.depth.array[, yrs.baseline, 1])
   
+  cooler.winter.array <- array(NA, dim = c(nherd, nyr, 3))
+  cooler.winter.array[, , 1] <- cooler.winter %>%
+    as.data.frame() %>%
+    unlist()
+  cooler.winter.array[, , 2] <- cooler.winter.array[, , 1]
+  cooler.winter.array[, , 3] <- rowMeans(cooler.winter.array[, yrs.baseline, 1])
+
+  start.spring.array <- array(NA, dim = c(nherd, nyr, 3))
+  start.spring.array[, , 1] <- start.spring %>%
+    as.data.frame() %>%
+    unlist()
+  start.spring.array[, , 2] <- start.spring.array[, , 1]
+  start.spring.array[, , 3] <- rowMeans(start.spring.array[, yrs.baseline, 1])
+
+  warm.dry.summer.array <- array(NA, dim = c(nherd, nyr, 3))
+  warm.dry.summer.array[, , 1] <- warm.dry.summer %>%
+    as.data.frame() %>%
+    unlist()
+  warm.dry.summer.array[, , 2] <- warm.dry.summer.array[, , 1]
+  warm.dry.summer.array[, , 3] <- rowMeans(warm.dry.summer.array[, yrs.baseline, 1])
+
+  rain.on.snow.array <- array(NA, dim = c(nherd, nyr, 3))
+  rain.on.snow.array[, , 1] <- rain.on.snow %>%
+    as.data.frame() %>%
+    unlist()
+  rain.on.snow.array[, , 2] <- rain.on.snow.array[, , 1]
+  rain.on.snow.array[, , 3] <- rowMeans(rain.on.snow.array[, yrs.baseline, 1])
+
+  ##########################################################################
+  # #Simulate climate+dist, climate-only, and disturbance-only scenarios
+  # pred_N[, 1, 1, ] <- out$mean$N[, 1, 1]
+  # pred_N[, 1, 2, ] <- out$mean$N[, 1, 2]
+  #
+  # # format is	 [hd,yr,sim]
+  # pred_s.daily[, 1, 1, ] <- out$mean$S[, 2]^(1 / 365) ## first herd-specific S available, transform to daily
+  # pred_S[, 1, 1, ] <- pred_s.daily[, 1, 1, ]^365
+  # pred_R[, 1, 1, ] <- out$mean$R[, 2]
+  #
+  # pred_totCalves[, 1, 1, ] <- out$mean$N[, 1, 1]
+  # pred_totAdults[, 1, 1, ] <- out$mean$N[, 1, 2]
+  # pred_totN[, 1, 1, ] <- out$mean$N[, 1, 1] + out$mean$N[, 1, 2]
+  # #
+  ## when no first year for all
+  pred_N[, 1, 1, ] <- 20
+  pred_N[, 1, 2, ] <- 175
+
+  # format is	 [hd,yr,sim]
+  pred_s.daily[, 1, 1, ] <- 0.85^(1 / 365) ## first herd-specific S available, transform to daily
+  pred_S[, 1, 1, ] <- 0.85
+  pred_R[, 1, 1, ] <- 0.18
+
+  pred_totCalves[, 1, 1, ] <- pred_N[, 1, 1, ]
+  pred_totAdults[, 1, 1, ] <- pred_N[, 1, 2, ]
+  pred_totN[, 1, 1, ] <- pred_totCalves[, 1, 1, ] + pred_totAdults[, 1, 1, ]
+
+  #  Apply sex ratio to get full population size
+  pred_totAdultsMF[, 1, 1, ] <- pred_totAdults[, 1, 1, ] / 0.66
+  pred_totCalvesMF[, 1, 1, ] <- pred_totCalves[, 1, 1, ] / 0.5
+  pred_totNMF[, 1, 1, ] <- pred_totAdultsMF[, 1, 1, ] + pred_totCalvesMF[, 1, 1, ]
+
+  for (h in 1:nherd) {
+    for (yr in 2:nyr) {
+      for (sim in 1:3) {
+        pred_s.daily[h, yr, 1, sim] <- as.numeric(ipm.LP.betas.i %>% filter(.variable == "muS") %>% pull(median) + # intercept (baseline survival)
+          ipm.LP.betas.i %>% filter(.variable == "beta.dist.s") %>% pull(median) * dist.hum.array[h, yr - 1, sim] + ## note dist.hum here and dist in IPM. Same data, just different notation
+          ipm.LP.betas.i %>% filter(.variable == "beta.snow.depth.s") %>% pull(median) * snow.depth.array[h, yr - 1, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.cooler.winter.s") %>% pull(median) * cooler.winter.array[h, yr - 1, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.start.spring.s") %>% pull(median) * start.spring.array[h, yr - 1, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.warm.dry.summer.s") %>% pull(median) * warm.dry.summer.array[h, yr - 1, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.rain.on.snow.s") %>% pull(median) * rain.on.snow.array[h, yr - 1, sim]) %>% plogis()
+        # s.daily to annual survival
+        pred_S[h, yr, 1, sim] <- pred_s.daily[h, yr, 1, sim]^365
+
+        pred_R[h, yr, 1, sim] <- as.numeric(ipm.LP.betas.i %>% filter(.variable == "muR") %>% pull(median) + # intercept (baseline recruitment)
+          # ipm.LP.betas.i %>% filter(.variable == "offset") %>% pull(median) * 9 +
+          ipm.LP.betas.i %>% filter(.variable == "beta.dist.r") %>% pull(median) * dist.hum.array[h, yr, sim] + ## note dist.hum here and dist in IPM. Same data, just different notation
+          ipm.LP.betas.i %>% filter(.variable == "beta.snow.depth.r") %>% pull(median) * snow.depth.array[h, yr, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.cooler.winter.r") %>% pull(median) * cooler.winter.array[h, yr, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.start.spring.r") %>% pull(median) * start.spring.array[h, yr, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.warm.dry.summer.r") %>% pull(median) * warm.dry.summer.array[h, yr, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.rain.on.snow.r") %>% pull(median) * rain.on.snow.array[h, yr, sim] +
+          ipm.LP.betas.i %>% filter(.variable == "beta.type.osc.r") %>% pull(median)) %>% plogis()
+
+        #  SubAdults and Adults: Binomial, dbin(p,n), 0 < p < 1 and n ≥ 1
+        pred_N[h, yr, 2, sim] <- pred_S[h, yr - 1, 1, sim] * (pred_N[h, yr - 1, 2, sim] + pred_N[h, yr - 1, 1, sim])
+        pred_totAdults[h, yr, 1, sim] <- pred_N[h, yr, 2, sim]
+        pred_totAdultsMF[h, yr, 1, sim] <- pred_totAdults[h, yr, 1, sim] / 0.66
+
+        # Calves
+        pred_N[h, yr, 1, sim] <- (pred_totAdultsMF[h, yr, 1, sim] * pred_R[h, yr, 1, sim]) * 0.5
+
+
+        #  Totals in each year - females only
+        pred_totCalves[h, yr, 1, sim] <- pred_N[h, yr, 1, sim]
+        pred_totN[h, yr, 1, sim] <- pred_totCalves[h, yr, 1, sim] + pred_totAdults[h, yr, 1, sim]
+
+        #  Apply sex ratio to get full population size
+        pred_totCalvesMF[h, yr, 1, sim] <- pred_totCalves[h, yr, 1, sim] / 0.5
+        pred_totNMF[h, yr, 1, sim] <- pred_totAdultsMF[h, yr, 1, sim] + pred_totCalvesMF[h, yr, 1, sim]
+      }
+    }
+  }
+  sim.results <- sim.results %>%
+    bind_rows(pred_totNMF[, , , 1] %>%
+      as_tibble() %>%
+      mutate(
+        sim = "Climate+Disturbance",
+        herd_num = row_number()
+      ) %>%
+      bind_rows(pred_totNMF[, , , 2] %>%
+        as_tibble() %>%
+        mutate(
+          sim = "Climate",
+          herd_num = row_number()
+        )) %>%
+      bind_rows(pred_totNMF[, , , 3] %>%
+        as_tibble() %>%
+        mutate(
+          sim = "Disturbance",
+          herd_num = row_number()
+        )) %>%
+      mutate(draw = draws[draw]))
+}
+
+write_csv(sim.results, here::here("tables", "sim.results.csv"))
+
+sim.results <- read_csv(here::here("tables", "sim.results.csv"))
+
+sim.results %>%
+  pivot_longer(-c("herd_num", "sim", "draw")) %>%
+  mutate(yr_idx = parse_number(name)) %>%
+  left_join(yr_df, by = "yr_idx") %>%
+  left_join(hd, by = "herd_num") %>%
+  select(draw, sim, herd, yrs, value) %>%
+  group_by(herd, sim, yrs) %>%
+  summarise(value = median(value)) %>%
+  ggplot(aes(x = yrs, y = value, color = sim, group = sim)) +
+  geom_line() +
+  facet_wrap(vars(herd), scales = "free")
+
+## sim 1==climate + disturbance
+## sim 2==climate only
+## sim 3==disturbance only
+sim.results %>%
+  pivot_longer(-c("herd_num", "sim", "draw")) %>%
+  mutate(yr_idx = parse_number(name)) %>%
+  left_join(yr_df, by = "yr_idx") %>%
+  left_join(hd, by = "herd_num") %>%
+  select(draw, sim, herd, yrs, value) %>%
+  group_by(draw, sim, yrs) %>%
+  summarise(value = sum(value)) %>%
+  ungroup() %>%
+  arrange(yrs, sim, draw) %>%
+  ggplot() +
+  geom_line(aes(x = yrs, y = value, color = sim, fill = sim, group = interaction(draw, sim)), alpha = 0.1) +
+  scale_y_continuous(limits = c(0, NA)) +
+  theme_ipsum() +
+  labs(x = "Year", y = "SMC abundance")
+
+
+sim.results %>%
+  pivot_longer(-c("herd_num", "sim", "draw")) %>%
+  mutate(yr_idx = parse_number(name)) %>%
+  left_join(yr_df, by = "yr_idx") %>%
+  left_join(hd, by = "herd_num") %>%
+  select(draw, sim, herd, yrs, value) %>%
+  group_by(draw, sim, yrs) %>%
+  summarise(value = sum(value)) %>%
+  ungroup() %>%
+  group_by(sim, yrs) %>%
+  summarise(
+    median = median(value),
+    lower = quantile(value, 0.05),
+    upper = quantile(value, 0.95)
+  ) %>%
+  ggplot(aes(x = yrs, y = median, ymin = lower, ymax = upper, color = sim, fill = sim)) +
+  geom_ribbon(alpha = 0.2, color = NA) +
+  geom_line() +
+  scale_y_continuous(limits = c(0, NA)) +
+  theme_ipsum() +
+  labs(x = "Year", y = "SMC abundance")
+
+# pred_totNMF[13, , , 1]
+# pred_totNMF[13, , , 2]
+# pred_totNMF[13, , , 3]
+#
+# pred_S[13, , , 1] %>% mean()
+# pred_S[13, , , 2] %>% mean()
+# pred_S[13, , , 3] %>% mean()
+#
+# pred_R[13, , , 1] %>% mean()
+# pred_R[13, , , 2] %>% mean()
+# pred_R[13, , , 3] %>% mean()
 ```

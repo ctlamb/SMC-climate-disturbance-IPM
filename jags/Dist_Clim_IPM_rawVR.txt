@@ -1,52 +1,57 @@
 model{
 
-###R survey timing or count type not in here yet
-
 #  Informative intercepts for survival and recreuitment
-	meanS <- logit(mean.s)
-	muS ~ dnorm(meanS, 100)
-	meanR <- logit(mean.r)
-	muR ~ dnorm(meanR, 100)
+	muS ~ dnorm(mean.s,mean.s.tau)
+	muR ~ dnorm(mean.r,mean.r.tau)
 	
 
 # Offset for survey timing - recruitment
-	offset ~ dnorm(0, 0.1) 
+	offset ~ dnorm(0, 0.01) 
 	
 # Count type offsets
-beta.type.otc.r ~ dnorm(0, 0.1) 
-beta.type.osc.r ~ dnorm(0, 0.1)
-beta.type.mnka.r ~ dnorm(0, 0.1)
+beta.type.otc.r ~ dnorm(0, 0.01) 
+beta.type.osc.r ~ dnorm(0, 0.01)
+beta.type.mnka.r ~ dnorm(0, 0.01)
 	
 # LP priors
 ##informative
   beta.dist.s  ~ dnorm(prior.dist.s.mean, prior.dist.s.tau)
 	beta.snow.depth.s ~ dnorm(prior.snow.depth.s.mean, prior.snow.depth.s.tau)
+	beta.cooler.winter.s ~ dnorm(prior.cooler.winter.s.mean, prior.cooler.winter.s.tau)
 	beta.start.spring.s ~ dnorm(prior.start.spring.s.mean, prior.start.spring.s.tau)
 	beta.warm.dry.summer.s ~ dnorm(prior.warm.dry.summer.s.mean, prior.warm.dry.summer.s.tau)
 	beta.rain.on.snow.s ~ dnorm(prior.rain.on.snow.s.mean, prior.rain.on.snow.s.tau)
 
   beta.dist.r  ~ dnorm(prior.dist.r.mean, prior.dist.r.tau)
 	beta.snow.depth.r ~ dnorm(prior.snow.depth.r.mean, prior.snow.depth.r.tau)
+	beta.cooler.winter.r ~ dnorm(prior.cooler.winter.r.mean, prior.cooler.winter.r.tau)
 	beta.start.spring.r ~ dnorm(prior.start.spring.r.mean, prior.start.spring.r.tau)
 	beta.warm.dry.summer.r ~ dnorm(prior.warm.dry.summer.r.mean, prior.warm.dry.summer.r.tau)
 	beta.rain.on.snow.r ~ dnorm(prior.rain.on.snow.r.mean, prior.rain.on.snow.r.tau)
 
 	
 # Linear predictors for survival and recruitment
+# survival covars get yr-1 because survival is start of year. survival during April 2022-March 2023 is assigned year 2022. Covars are already yr+1 so that March 2023 counts and R correspond to 2022 covariates.
 	for(h in 1:nherd){
-		for(yr in 1:nyr){
+	
+	logit(s.daily[h,first[h]]) <-muS
+	logit(R[h,first[h]]) <- muR
+	
+		for(yr in (first[h]+1):last[h]){
 			
 			logit(s.daily[h,yr]) <- muS + # intercept (baseline survival)
-				beta.dist.s*dist[h,yr]+
-								beta.snow.depth.s*snow.depth[h,yr] + 
-												beta.start.spring.s*start.spring[h,yr]+
-												    beta.warm.dry.summer.s*warm.dry.summer[h,yr]+
-												        beta.rain.on.snow.s*rain.on.snow[h,yr]
+				beta.dist.s*dist[h,yr-1]+ 
+								beta.snow.depth.s*snow.depth[h,yr-1] + 
+								    beta.cooler.winter.s*cooler.winter[h,yr-1] + 
+												beta.start.spring.s*start.spring[h,yr-1]+
+												    beta.warm.dry.summer.s*warm.dry.summer[h,yr-1]+
+												        beta.rain.on.snow.s*rain.on.snow[h,yr-1]
 				
 			logit(R[h,yr]) <- muR + # intercept (baseline recruitment) 
 				offset*month_offset[h,yr]  +
 				beta.dist.r*dist[h,yr]+
 								beta.snow.depth.r*snow.depth[h,yr] + 
+							    	beta.cooler.winter.r*cooler.winter[h,yr] + 
 												beta.start.spring.r*start.spring[h,yr]+
 												    beta.warm.dry.summer.r*warm.dry.summer[h,yr]+
 												        beta.rain.on.snow.r*rain.on.snow[h,yr]+
@@ -58,22 +63,15 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 			}
 
 
+
 # s.daily to annual survival
 	for(h in 1:nherd){
-		for(yr in 1:nyr){
+		for(yr in first[h]:last[h]){
 		S[h,yr] <- pow(s.daily[h,yr], 365)
 		}}
 
-# Random effect for year-SG
-	for(sg in 1:nsight_grp){	
-		sight_tau_yr_sg[sg] <- 1/(sight_sd_yr_sg[sg]^2)
-		sight_sd_yr_sg[sg] ~ dunif(0, 10)
-		for(yr in 1:nyr){
-			sight_yr_sg[yr, sg] ~ dnorm(0, sight_tau_yr_sg[sg]) 
-			}
-		}
-	
-# Sightability
+
+# Sightability for herds/year without sightability
 	for(sg in 1:nsight_grp){	
 		p_logit[sg] ~ dnorm(mean_grp_p[sg], mean_grp_ptau[sg])T(0, 1) # 0 - 1
 		p_mu[sg] <- logit(p_logit[sg]) # -Inf - Inf
@@ -83,14 +81,14 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 	#  p is only used in observation model for surveys that *do not* have their own
 	#   sightability estimate
 	for(h in 1:nherd){	
-		for(yr in first[h]:nyr){
-			logit(p[h, yr]) <- p_mu[sight_grp[h]] + sight_yr_sg[yr,sight_grp[h]]
+		for(yr in first[h]:last[h]){
+			logit(p[h, yr]) <- p_mu[sight_grp[h]]
 		}
 	}
 
 # Sex ratio
 	for(h in 1:nherd){	
-		for(yr in first[h]:nyr){
+		for(yr in first[h]:last[h]){
 			sexratio[h,yr] ~ dnorm(meansr[1,1], meansr[1,2])T(0,1)
 			}
 		}
@@ -98,9 +96,11 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 		
 # First year population size
 	for(h in 1:nherd){	
-
-		N[h,first[h],1] ~ dpois(n1[h,1])
-		N[h,first[h],2] ~ dpois(n1[h,2])
+##CL tried dnorm here to make sure the starting pop size isn't an issue, want error on it
+		#N[h,first[h],1] ~ dpois(n1[h,1])
+		#N[h,first[h],2] ~ dpois(n1[h,2])
+		N[h,first[h],1] ~ dnorm(n1[h,1],0.0001)T(0,)
+		N[h,first[h],2] ~ dnorm(n1[h,2],0.0001)T(0,)
 		
 		totCalves[h,first[h]] <- N[h,first[h],1] 
 		totAdults[h,first[h]] <- N[h,first[h],2] 
@@ -116,9 +116,6 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 		R_adj[h,first[h]] <- 0.1
 		
 		adj_totNMF[h,first[h]] <- totNMF[h,first[h]]
-		
-		adj_N1[h,first[h]] <- N[h,first[h],1]
-		adj_N2[h,first[h]] <- N[h,first[h],2]
 		}
 		
 
@@ -126,13 +123,13 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 #  Process model - multiple herds, 2 ages
 
 	for(h in 1:nherd){	
-		for(yr in (first[h]+1):nyr){
+		for(yr in (first[h]+1):last[h]){
 				
 			# Calves: Poisson, dpois(lambda) where lambda >= 0
 			N[h,yr,1] ~ dpois((totAdultsMF[h,yr] * R[h,yr]) * 0.5)
 
 			#  SubAdults and Adults: Binomial, dbin(p,n), 0 < p < 1 and n ≥ 1
-			N[h,yr,2] ~ dbin(S[h,yr-1], (N[h,yr-1,2] + N[h,yr-1,1]))
+			N[h,yr,2] ~ dbin(S[h,yr-1], round(N[h,yr-1,2] + N[h,yr-1,1]))
 
 			#  Totals in each year - females only
 			totCalves[h,yr] <- N[h,yr,1] 
@@ -146,15 +143,13 @@ beta.type.mnka.r ~ dnorm(0, 0.1)
 
 		
 		# Derived parameters
-		# adult R
-		#R.ad[h,yr] <- ifelse(adj_N2[h,yr-1]<5, 0, adj_N1[h,yr] /(adj_N2[h,yr-1] * S[h,yr-1]))
 		logit(R_adj[h,yr]) <- logit(R[h,yr]) - offset*month_offset[h,yr]
 		
 		# Adjust totNMF for very small population 
 		adj_totNMF[h,yr] <- ifelse(totNMF[h,yr]<1, 0, totNMF[h,yr])
 	
 		# Lambda
-		lambda[h,yr] <- (adj_totNMF[h,yr] + 0.001)/abs(adj_totNMF[h,yr-1] + 0.001)
+		lambda[h,yr] <- (adj_totNMF[h,yr] + 0.001)/(adj_totNMF[h,yr-1] + 0.001)
 		}
 	}
 		

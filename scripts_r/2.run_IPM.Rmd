@@ -7,8 +7,9 @@ output: github_document
 
 
 ```{r render,include=FALSE, eval=FALSE}
-rmarkdown::render(here::here("scripts_r", '2.run_IPM.Rmd'),
-                  output_file =  "README.md")
+rmarkdown::render(here::here("scripts_r", "2.run_IPM.Rmd"),
+  output_file = "README.md"
+)
 ```
 
 
@@ -22,11 +23,11 @@ library(tidylog)
 library(tidyverse)
 
 # Load data ---------------------------------------------------------------
-hd <- read.csv(here::here("data/clean/blueprint.csv"))
+hd <- read.csv(here::here("data/clean/forIPM/blueprint.csv"))
 hn <- hd %>%
   dplyr::select(herd, herd_num)
 
-##demographic data
+## demographic data
 cdat <- read_csv(here::here("data/clean/forIPM/cdat.csv"))
 edat <- read_csv(here::here("data/clean/forIPM/edat.csv"))
 sdat <- read_csv(here::here("data/clean/forIPM/surv.yr.ipm.csv"))
@@ -35,65 +36,81 @@ srdat <- read_csv(here::here("data/clean/forIPM/srdat.csv"))
 pdat <- read_csv(here::here("data/clean/forIPM/pdat.csv"))
 sexratio_summary <- read.csv(here::here("data/clean/sexratio_summary.csv"))
 
-##covariates
-dist.hum <- readRDS(here::here("data/clean/forIPM/dist.hum.rds"))
+## covariates
+# library(ggcorrplot)
+# covariates%>%
+#   select(!!covar.names)%>%
+#   drop_na()%>%
+#   cor()%>%
+# ggcorrplot(hc.order = TRUE, type = "lower",
+#    lab = TRUE)
+## start spring and growing season length correlated at -0.72. Just use start spring
+
+dist.hum <- readRDS(here::here("data/clean/forIPM/dist.hum.es.rds"))
 snow.depth <- readRDS(here::here("data/clean/forIPM/snow.depth.rds"))
+cooler.winter <- readRDS(here::here("data/clean/forIPM/cooler.winter.rds"))
 start.spring <- readRDS(here::here("data/clean/forIPM/start.spring.rds"))
 warm.dry.summer <- readRDS(here::here("data/clean/forIPM/warm.dry.summer.rds"))
 rain.on.snow <- readRDS(here::here("data/clean/forIPM/rain.on.snow.rds"))
 
-##fill 1970's covariate values for rain on snow
-early.fill <- rain.on.snow[,11:16]%>%rowwise() %>% mutate(m=mean(`11`:`16`))
-rain.on.snow[,1:10] <- early.fill$m
+## fill 1970's covariate values for rain on snow
+early.fill <- rain.on.snow[, 11:16] %>%
+  rowwise() %>%
+  mutate(m = mean(`11`:`16`))
+rain.on.snow[, 1:10] <- early.fill$m
 
-##other
-#first_per_herd <- read_csv(here::here("data/clean/forIPM/first_per_herd.csv"))
+## other
+first_per_herd <- read_csv(here::here("data/clean/forIPM/first_per_herd.csv"))
+last_per_herd <- read_csv(here::here("data/clean/forIPM/last_per_herd.csv"))
 month_offset <- read_csv(here::here("data/clean/forIPM/month_offset.csv"))
 grp_p <- read_csv(here::here("data/clean/forIPM/grp_p.csv"))
 single.params <- read_csv(here::here("data/clean/forIPM/single.params.csv"))
-meancount<- read_csv(here::here("data/clean/forIPM/meancount.csv"))
-count.otc<- read_csv(here::here("data/clean/forIPM/count.otc.csv"))
-count.osc<- read_csv(here::here("data/clean/forIPM/count.osc.csv"))
-count.mnka<- read_csv(here::here("data/clean/forIPM/count.mnka.csv"))
+meancount <- read_csv(here::here("data/clean/forIPM/meancount.csv"))
+count.otc <- read_csv(here::here("data/clean/forIPM/count.otc.csv"))
+count.osc <- read_csv(here::here("data/clean/forIPM/count.osc.csv"))
+count.mnka <- read_csv(here::here("data/clean/forIPM/count.mnka.csv"))
 yr_df <- read_csv(here::here("data/clean/forIPM/yr_df.csv"))
 ```
 
 ## Estimate Prior
 ```{r Estimate Priors, results='hide', message=FALSE, warning=FALSE}
-mean.s <-mean(1-(sdat$events/sdat$trials))
-mean.r <-mean(rdat$events/rdat$trials)
+mean.s <- 1-(sum(sdat$events) / sum(sdat$trials))
+mean.r <- mean(rdat$events / rdat$trials)
 
 ipm.prior.dat <- list(
-  mean.s=mean.s,
-  mean.r=mean.r,
-  ns=nrow(sdat),
-  nr=nrow(rdat),
-  sdat=sdat,
-  rdat=rdat,
-  dist = dist.hum, 
+  mean.s = mean.s,
+  mean.r = mean.r,
+  ns = nrow(sdat),
+  nr = nrow(rdat),
+  sdat = sdat,
+  rdat = rdat,
+  dist = dist.hum,
   snow.depth = snow.depth,
-  start.spring= start.spring,
-  warm.dry.summer=warm.dry.summer,
-  rain.on.snow=rain.on.snow
+  cooler.winter=cooler.winter,
+  start.spring = start.spring,
+  warm.dry.summer = warm.dry.summer,
+  rain.on.snow = rain.on.snow
 )
 
 
 
 prior.mod <-
-  "model{ 
+  "model{
     # priors
 	meanS <- logit(mean.s)
-	muS ~ dnorm(meanS, 100)
+	muS ~ dnorm(meanS, 1)
     beta.dist.s ~ dunif(-10,10)
     beta.snow.depth.s ~ dunif(-10,10)
+    beta.cooler.winter.s ~ dunif(-10,10)
     beta.start.spring.s ~ dunif(-10,10)
     beta.warm.dry.summer.s ~ dunif(-10,10)
     beta.rain.on.snow.s ~ dunif(-10,10)
-    
+
 	meanR <- logit(mean.r)
-	muR ~ dnorm(meanR, 100)
+	muR ~ dnorm(meanR, 1)
     beta.dist.r ~ dunif(-10,10)
     beta.snow.depth.r ~ dunif(-10,10)
+    beta.cooler.winter.r ~ dunif(-10,10)
     beta.start.spring.r ~ dunif(-10,10)
     beta.warm.dry.summer.r ~ dunif(-10,10)
     beta.rain.on.snow.r ~ dunif(-10,10)
@@ -101,67 +118,75 @@ prior.mod <-
     beta.type.otc.r ~ dunif(-10,10)
     beta.type.osc.r ~ dunif(-10,10)
     beta.type.mnka.r ~ dunif(-10,10)
-    
+
     # likelihood
     for (i in 1:ns){
             sdat[i,3] ~ dbin((1-s[i]), sdat[i,4])
-            logit(s[i]) <- muS + 
-            beta.dist.s*dist[sdat[i,1],sdat[i,2]] + 
-            beta.snow.depth.s*snow.depth[sdat[i,1],sdat[i,2]] + 
-            beta.start.spring.s*start.spring[sdat[i,1],sdat[i,2]] + 
-            beta.warm.dry.summer.s*warm.dry.summer[sdat[i,1],sdat[i,2]] + 
+            logit(s[i]) <- muS +
+            beta.dist.s*dist[sdat[i,1],sdat[i,2]] +
+            beta.snow.depth.s*snow.depth[sdat[i,1],sdat[i,2]] +
+            beta.cooler.winter.s*cooler.winter[sdat[i,1],sdat[i,2]] +
+            beta.start.spring.s*start.spring[sdat[i,1],sdat[i,2]] +
+            beta.warm.dry.summer.s*warm.dry.summer[sdat[i,1],sdat[i,2]] +
             beta.rain.on.snow.s*rain.on.snow[sdat[i,1],sdat[i,2]]
     }
-    
+
         for (i in 1:nr){
             rdat[i,3] ~ dbin(r[i], rdat[i,4])
-            logit(r[i]) <- muR + 
-            beta.dist.r*dist[rdat[i,1],rdat[i,2]] + 
-            beta.snow.depth.r*snow.depth[rdat[i,1],rdat[i,2]] + 
+            logit(r[i]) <- muR +
+            beta.dist.r*dist[rdat[i,1],rdat[i,2]] +
+            beta.snow.depth.r*snow.depth[rdat[i,1],rdat[i,2]] +
+            beta.cooler.winter.r*cooler.winter[rdat[i,1],rdat[i,2]] +
             beta.start.spring.r*start.spring[rdat[i,1],rdat[i,2]] +
             beta.warm.dry.summer.r*warm.dry.summer[rdat[i,1],rdat[i,2]] +
             beta.rain.on.snow.r*rain.on.snow[rdat[i,1],rdat[i,2]] +
             beta.season.r*rdat[i,5]+
             beta.type.otc.r*rdat[i,6] + beta.type.osc.r*rdat[i,7] + beta.type.mnka.r*rdat[i,8]
-            
+
     }
 
 }"
 
 
 nth <- 50
-nbu <- 3000
+nbu <- 0
 nch <- 3
-nad <- 3000
-nit <- 50000
+nad <- 5000
+nit <- 30000
 
-out.priors <- jagsUI::jags(ipm.prior.dat, 
-                         inits =NULL,
-                         parameters.to.save=c("s", "muS", "beta.dist.s", "beta.snow.depth.s", "beta.start.spring.s",  "beta.warm.dry.summer.s", "beta.rain.on.snow.s",
-                                              "r", "muR", "beta.dist.r", "beta.snow.depth.r", "beta.start.spring.r", "beta.warm.dry.summer.r", "beta.rain.on.snow.r", "beta.season.r"),
-                         model.file = textConnection(prior.mod),
-                         n.chains = nch,
-                         n.cores = nch,
-                         n.iter = nit,
-                         n.burnin = nbu,
-                         n.thin = nth,
-                         n.adapt = nad)
+out.priors <- jagsUI::jags(ipm.prior.dat,
+  inits = NULL,
+  parameters.to.save = c(
+    "s", "muS", "beta.dist.s", "beta.snow.depth.s", "beta.cooler.winter.s", "beta.start.spring.s", "beta.warm.dry.summer.s", "beta.rain.on.snow.s",
+    "r", "muR", "beta.dist.r", "beta.snow.depth.r", "beta.cooler.winter.r", "beta.start.spring.r", "beta.warm.dry.summer.r", "beta.rain.on.snow.r", "beta.season.r"
+  ),
+  model.file = textConnection(prior.mod),
+  n.chains = nch,
+  n.cores = nch,
+  n.iter = nit,
+  n.burnin = nbu,
+  n.thin = nth,
+  n.adapt = nad
+)
 
 # mcmcplots::mcmcplot(out.priors$samples, par = c("muS", "beta.dist.s", "beta.snow.depth.s", "beta.start.spring.s",  "beta.warm.dry.summer.s", "beta.rain.on.snow.s", "muR", "beta.dist.r", "beta.snow.depth.r", "beta.start.spring.r", "beta.warm.dry.summer.r", "beta.rain.on.snow.r", "beta.season.r"))
 
 
-priors <- out.priors%>%
-  gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
-               muR, beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r, beta.season.r)%>%
-  group_by(.variable)%>%
-  summarise(mean=mean(.value),
-            sd=sd(.value),
-            tau=(1/(sd^2)))
+priors <- out.priors %>%
+  gather_draws(
+    muS, beta.dist.s, beta.snow.depth.s, beta.cooler.winter.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+    muR, beta.dist.r, beta.snow.depth.r, beta.cooler.winter.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r, beta.season.r
+  ) %>%
+  group_by(.variable) %>%
+  summarise(
+    mean = mean(.value),
+    sd = sd(.value),
+    tau = (1 / (sd^2))
+  )
 ```
 
 ## Prep data for IPM
 ```{r Prep data for IPM, results='hide', message=FALSE, warning=FALSE}
-
 # Herds and herd number
 nherd <- single.params$nherd
 nsight_grp <- single.params$nsight_grp
@@ -175,92 +200,97 @@ mean_grp_p <- grp_p$mean_grp_p
 mean_grp_ptau <- grp_p$mean_grp_ptau
 
 sgt_grp_ind <- matrix(nrow = nherd, ncol = nyr)
-for(sg in 1:nrow(sgt_grp_ind)){
-  sgt_grp_ind[sg,] <- hd$sight_grp[hd$herd_num == sg]
+for (sg in 1:nrow(sgt_grp_ind)) {
+  sgt_grp_ind[sg, ] <- hd$sight_grp[hd$herd_num == sg]
 }
 
 
-##starting age class distribution (sensitivity tested this in McNay et al. 2022 and it doesnt have a meaningful effect even if substantially changed)
+## starting age class distribution (sensitivity tested this in McNay et al. 2022 and it doesnt have a meaningful effect even if substantially changed)
 n1s <- meancount$n1_mean
 n1 <- matrix(NA, nrow = nherd, ncol = nage)
-for(h in 1:nherd){
-  n1[h,1] <- (n1s[h]*0.5)*0.15
-  n1[h,2] <- (n1s[h]*0.64)*0.85 
+for (h in 1:nherd) {
+  n1[h, 1] <- (n1s[h] * 0.5) * 0.15
+  n1[h, 2] <- (n1s[h] * 0.64) * 0.85
 }
 
+# n1error <- matrix(NA, nrow = nherd, ncol = nage)
+# for (h in 1:nherd) {
+#   n1error <- 1/((n1)^2)
+# }
 
-meansr <- array(NA, c(1,2))
-meansr[1,1] <- sexratio_summary[1,1]
-#meansr[1,2] <- 1/(sexratio_summary[1,2]^2)
-meansr[1,2] <- 10000 ##make sex ratio more precise so model doesnt eat variance up here
+meansr <- array(NA, c(1, 2))
+meansr[1, 1] <- sexratio_summary[1, 1]
+# meansr[1,2] <- 1/(sexratio_summary[1,2]^2)
+meansr[1, 2] <- 1 / (0.01^2) ## make sex ratio very precise so model doesn't eat as much variance up here
 
-##first year of data (legacy...set at 1 so all herds start at year 1 now)
-first <- rep(1,nherd)
+# ## first year of data (legacy...set at 1 so all herds start at year 1 now)
+# first <- rep(1, nherd)
+first <- first_per_herd%>%pull(yr)
+last <- last_per_herd%>%pull(yr_idx)
 
 
 ## Gather data inputs in a list
 
 ipm_dat <- list(
-  mean.s=mean.s,
-  mean.r=mean.r,
-  
+  mean.s = priors %>% filter(.variable == "muS") %>% pull(mean),
+  mean.s.tau = priors %>% filter(.variable == "muS") %>% pull(tau),
+  mean.r = priors %>% filter(.variable == "muR") %>% pull(mean),
+  mean.r.tau = priors %>% filter(.variable == "muR") %>% pull(tau),
   nherd = nherd,
   nyr = nyr,
   first = first,
-  
+  last = last,
   month_offset = month_offset,
-  count.otc=count.otc,
-  count.osc=count.osc,
-  count.mnka=count.mnka,
-  
-  nc = single.params$nc, 
+  count.otc = count.otc,
+  count.osc = count.osc,
+  count.mnka = count.mnka,
+  nc = single.params$nc,
   ne = single.params$ne,
   ns = single.params$ns,
   nr = single.params$nr,
   nsr = single.params$nsr,
-  
   nsight_grp = nsight_grp,
   sight_grp = hd$sight_grp,
-  
   mean_grp_p = mean_grp_p,
   mean_grp_ptau = mean_grp_ptau,
   meansr = meansr,
-  
-  n1 = n1, 
+  n1 = n1,
   cdat = cdat,
   edat = edat,
   sdat = sdat,
   srdat = srdat,
   pdat = pdat,
   rdat = rdat,
-  
-  dist = dist.hum, 
+  dist = dist.hum,
   snow.depth = snow.depth,
-  start.spring= start.spring,
-  warm.dry.summer=warm.dry.summer,
-  rain.on.snow=rain.on.snow,
-  
-  prior.dist.s.mean=priors%>%filter(.variable=="beta.dist.s")%>%pull(mean),
-  prior.dist.s.tau=priors%>%filter(.variable=="beta.dist.s")%>%pull(tau),
-  prior.snow.depth.s.mean=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(mean),
-  prior.snow.depth.s.tau=priors%>%filter(.variable=="beta.snow.depth.s")%>%pull(tau),
-  prior.start.spring.s.mean=priors%>%filter(.variable=="beta.start.spring.s")%>%pull(mean),
-  prior.start.spring.s.tau=priors%>%filter(.variable=="beta.start.spring.s")%>%pull(tau),
-  prior.warm.dry.summer.s.mean=priors%>%filter(.variable=="beta.warm.dry.summer.s")%>%pull(mean),
-  prior.warm.dry.summer.s.tau=priors%>%filter(.variable=="beta.warm.dry.summer.s")%>%pull(tau),
-  prior.rain.on.snow.s.mean=priors%>%filter(.variable=="beta.rain.on.snow.s")%>%pull(mean),
-  prior.rain.on.snow.s.tau=priors%>%filter(.variable=="beta.rain.on.snow.s")%>%pull(tau),
-  
-  prior.dist.r.mean=priors%>%filter(.variable=="beta.dist.r")%>%pull(mean),
-  prior.dist.r.tau=priors%>%filter(.variable=="beta.dist.r")%>%pull(tau),
-  prior.snow.depth.r.mean=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(mean),
-  prior.snow.depth.r.tau=priors%>%filter(.variable=="beta.snow.depth.r")%>%pull(tau),
-  prior.start.spring.r.mean=priors%>%filter(.variable=="beta.start.spring.r")%>%pull(mean),
-  prior.start.spring.r.tau=priors%>%filter(.variable=="beta.start.spring.r")%>%pull(tau),
-  prior.warm.dry.summer.r.mean=priors%>%filter(.variable=="beta.warm.dry.summer.r")%>%pull(mean),
-  prior.warm.dry.summer.r.tau=priors%>%filter(.variable=="beta.warm.dry.summer.r")%>%pull(tau),
-  prior.rain.on.snow.r.mean=priors%>%filter(.variable=="beta.rain.on.snow.r")%>%pull(mean),
-  prior.rain.on.snow.r.tau=priors%>%filter(.variable=="beta.rain.on.snow.r")%>%pull(tau)
+  cooler.winter=cooler.winter,
+  start.spring = start.spring,
+  warm.dry.summer = warm.dry.summer,
+  rain.on.snow = rain.on.snow,
+  prior.dist.s.mean = priors %>% filter(.variable == "beta.dist.s") %>% pull(mean),
+  prior.dist.s.tau = priors %>% filter(.variable == "beta.dist.s") %>% pull(tau),
+  prior.snow.depth.s.mean = priors %>% filter(.variable == "beta.snow.depth.s") %>% pull(mean),
+  prior.snow.depth.s.tau = priors %>% filter(.variable == "beta.snow.depth.s") %>% pull(tau),
+  prior.cooler.winter.s.mean = priors %>% filter(.variable == "beta.cooler.winter.s") %>% pull(mean),
+  prior.cooler.winter.s.tau = priors %>% filter(.variable == "beta.cooler.winter.s") %>% pull(tau),
+  prior.start.spring.s.mean = priors %>% filter(.variable == "beta.start.spring.s") %>% pull(mean),
+  prior.start.spring.s.tau = priors %>% filter(.variable == "beta.start.spring.s") %>% pull(tau),
+  prior.warm.dry.summer.s.mean = priors %>% filter(.variable == "beta.warm.dry.summer.s") %>% pull(mean),
+  prior.warm.dry.summer.s.tau = priors %>% filter(.variable == "beta.warm.dry.summer.s") %>% pull(tau),
+  prior.rain.on.snow.s.mean = priors %>% filter(.variable == "beta.rain.on.snow.s") %>% pull(mean),
+  prior.rain.on.snow.s.tau = priors %>% filter(.variable == "beta.rain.on.snow.s") %>% pull(tau),
+  prior.dist.r.mean = priors %>% filter(.variable == "beta.dist.r") %>% pull(mean),
+  prior.dist.r.tau = priors %>% filter(.variable == "beta.dist.r") %>% pull(tau),
+  prior.snow.depth.r.mean = priors %>% filter(.variable == "beta.snow.depth.r") %>% pull(mean),
+  prior.snow.depth.r.tau = priors %>% filter(.variable == "beta.snow.depth.r") %>% pull(tau),
+  prior.cooler.winter.r.mean = priors %>% filter(.variable == "beta.cooler.winter.r") %>% pull(mean),
+  prior.cooler.winter.r.tau = priors %>% filter(.variable == "beta.cooler.winter.r") %>% pull(tau),
+  prior.start.spring.r.mean = priors %>% filter(.variable == "beta.start.spring.r") %>% pull(mean),
+  prior.start.spring.r.tau = priors %>% filter(.variable == "beta.start.spring.r") %>% pull(tau),
+  prior.warm.dry.summer.r.mean = priors %>% filter(.variable == "beta.warm.dry.summer.r") %>% pull(mean),
+  prior.warm.dry.summer.r.tau = priors %>% filter(.variable == "beta.warm.dry.summer.r") %>% pull(tau),
+  prior.rain.on.snow.r.mean = priors %>% filter(.variable == "beta.rain.on.snow.r") %>% pull(mean),
+  prior.rain.on.snow.r.tau = priors %>% filter(.variable == "beta.rain.on.snow.r") %>% pull(tau)
 )
 
 
@@ -268,15 +298,17 @@ ipm_dat <- list(
 #  Indexing was off here
 Nst <- array(NA_integer_, c(nherd, nyr, nage))
 
-for(h in 1:nherd) {
-  for(a in 1:nage) {
-    Nst[h, first[h]:nyr, a] <- as.integer(
+for (h in 1:nherd) {
+  for (a in 1:nage) {
+    Nst[h, first[h]:last[h], a] <- as.integer(
       max(
-        c(n1[h, a], cdat$mu[cdat$herd == h], edat$mu[edat$herd == h])))  
+        c(n1[h, a], cdat$mu[cdat$herd == h], edat$mu[edat$herd == h])
+      )
+    )
   }
 }
 
-ipm_inits <- function(){ 
+ipm_inits <- function() {
   list(
     N = Nst
   )
@@ -285,153 +317,90 @@ ipm_inits <- function(){
 
 #  Model parameters to monitor
 model_parms <- c(
-  
-  "totNMF", "totN", "lambda",
-  
-  "S", "R",  "R_adj", 
-  #"R.ad",
-  
-  "muS", "muR", 
-  
+  "N", "totNMF", "totN", "lambda",
+  "S", "R", "R_adj",
+  # "R.ad",
+
+  "muS", "muR",
   "offset",
   "beta.dist.s",
   "beta.snow.depth.s",
+  "beta.cooler.winter.s",
   "beta.start.spring.s",
   "beta.warm.dry.summer.s",
   "beta.rain.on.snow.s",
-  
   "beta.dist.r",
   "beta.snow.depth.r",
+  "beta.cooler.winter.r",
   "beta.start.spring.r",
   "beta.warm.dry.summer.r",
   "beta.rain.on.snow.r",
-  
   "beta.type.otc.r", "beta.type.osc.r", "beta.type.mnka.r",
-  
-  #"sight_sd_yr_sg","sight_tau_yr_sg","sight_yr_sg", 
-  
-  "p_mu","p", "sight_est",
-  
+
+  # "sight_sd_yr_sg","sight_tau_yr_sg","sight_yr_sg",
+
+  "p_mu", "p", "sight_est",
   "sexratio"
 )
 ```
 
 ## Run IPM
 ```{r Run IPM, results='hide', message=FALSE, warning=FALSE}
-nth <- 50
-nbu <- 5000 
+nth <- 100
+nbu <- 0
 nch <- 3
-nad <- 5000
-nit <- 50000 
+nad <- 40000
+nit <- 250000
 
-# nth <- 50
-# nbu <- 20000 
+
+# nth <- 1
+# nbu <- 0
 # nch <- 3
-# nad <- 20000
-# nit <- 300000 
+# nad <- 1000
+# nit <- 5000
 
-# nth <- 20
-# nbu <- 200
-# nch <- 3
-# nad <- 200
-# nit <- 1000
-
-out <- jagsUI::jags(ipm_dat, 
-                    inits = ipm_inits,
-                    model_parms,
-                    model.file = here::here("jags/Dist_Clim_IPM_rawVR_noRE.txt"),
-                    n.chains = nch,
-                    n.cores = nch,
-                    n.iter = nit,
-                    n.burnin = nbu,
-                    n.thin = nth,
-                    n.adapt = nad)
+out <- jagsUI::jags(ipm_dat,
+  inits = ipm_inits,
+  model_parms,
+  model.file = here::here("jags/Dist_Clim_IPM_rawVR.txt"),
+  n.chains = nch,
+  n.cores = nch,
+  n.iter = nit,
+  n.burnin = nbu,
+  n.thin = nth,
+  n.adapt = nad
+)
 
 saveRDS(out, file = here::here("jags/output/BCAB_CaribouIPM_posteriors.rds"))
 ```
+
 ## Plot draws
 ```{r plot draws, results='hide', message=FALSE, warning=FALSE}
-draws <- out%>%
-  gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
-               muR, beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r)%>%
-  mutate(type="Posteriors")%>%
-  rbind(out.priors%>%
-          gather_draws(muS, beta.dist.s, beta.snow.depth.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
-                       muR, beta.dist.r, beta.snow.depth.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r)%>%
-          mutate(type="Priors"))
+draws <- out %>%
+  gather_draws(
+    muS, beta.dist.s, beta.snow.depth.s, beta.cooler.winter.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+    muR, beta.dist.r, beta.snow.depth.r, beta.cooler.winter.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r
+  ) %>%
+  mutate(type = "Posteriors") %>%
+  rbind(out.priors %>%
+    gather_draws(
+      muS, beta.dist.s, beta.snow.depth.s, beta.cooler.winter.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
+      muR, beta.dist.r, beta.snow.depth.r, beta.cooler.winter.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r
+    ) %>%
+    mutate(type = "Priors"))
 
-draws%>%
-  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r"))%>%
-  ggplot(aes(x=.value, fill=type))+
-  geom_density(alpha=0.5)+
-  facet_wrap(vars(.variable), scales="free")+
-  geom_vline(xintercept = 0, linetype="dashed")
+draws %>%
+  filter(!.variable %in% c("alpha.r", "alpha.s", "beta.season.r")) %>%
+  ggplot(aes(x = .value, fill = type)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(.variable), scales = "free") +
+  geom_vline(xintercept = 0, linetype = "dashed")
 
-draws%>%
-  filter(!.variable%in%c("alpha.r","alpha.s","beta.season.r","muS","muR"))%>%
-  ggplot(aes(x=.value, fill=type))+
-  geom_density(alpha=0.5)+
-  facet_wrap(vars(.variable))+
-  geom_vline(xintercept = 0, linetype="dashed")
-```
-```{r plot Nakusp for Nowak, results='hide', message=FALSE, warning=FALSE}
-df.temp <- rbind(edat%>%mutate(type="count", se=sqrt(1/tau))%>%select(herd,year,mu,se,type),
-      sdat%>%mutate(mu=(1-(events/trials))^365,se=sqrt((mu*(1-mu))/(trials/365)),type="S")%>%select(herd,year,mu,se,type),
-      rdat%>%mutate(mu=events/trials,se=sqrt((mu*(1-mu))/trials),type="R")%>%select(herd,year,mu,se,type))%>%
-  filter(herd=="23")
-
-
-ipm.temp <- demog%>%
-  filter(i==23)%>%
-  mutate(type="R")%>%
-  select(herd,year=yrs,mu=R, lower=R.lower, upper=R.upper, type)%>%
-  rbind(demog%>%
-  filter(i==23)%>%
-  mutate(type="S")%>%
-  select(herd,year=yrs,mu=S, lower=S.lower, upper=S.upper, type))%>%
-  rbind(demog%>%
-  filter(i==23)%>%
-  mutate(type="count")%>%
-  select(herd,year=yrs,mu=totNMF, lower=totNMF.lower, upper=totNMF.upper, type))%>%
-  rbind(demog%>%
-  filter(i==23)%>%
-  mutate(type="lambda")%>%
-  select(herd,year=yrs,mu=lambda, lower=lambda.lower, upper=lambda.upper, type))
-
-
-  ggplot()+
-  geom_linerange(data=df.temp, aes(x=year+1969, y=mu, ymin=mu-se, ymax=mu+se))+
-  geom_point(data=df.temp, aes(x=year+1969, y=mu, ymin=mu-se, ymax=mu+se))+
-  geom_linerange(data=ipm.temp, aes(x=year, y=mu, ymin=lower, ymax=upper), color="orange")+
-  geom_point(data=ipm.temp, aes(x=year, y=mu,  ymin=lower, ymax=upper), color="orange")+
-  facet_wrap(vars(type), scales="free_y")+
-  labs(x="Year")
-  
-  
-
-
-covariates%>%
-  filter(year>1970, herd=="Nakusp")%>%
-  select(herd,year,dist.hum, snow.depth, start.spring, warm.dry.summer, rain.on.snow)%>%
-  pivot_longer(dist.hum:rain.on.snow)%>%
-  ggplot(aes(x=year,y=value))+
-  geom_point()+
-  geom_path()+
-  facet_wrap(vars(name), scales="free_y")
-
-
-
-library(corrr)
-df.temp%>%
-  select(year,mu,type)%>%
-  pivot_wider(values_from=mu, names_from=type)%>%
-  select(-year)%>%
-  correlate()
-
-ipm.temp%>%
-  select(year,mu,type)%>%
-  pivot_wider(values_from=mu, names_from=type)%>%
-  select(-year)%>%
-  correlate()
+draws %>%
+  filter(!.variable %in% c("alpha.r", "alpha.s", "beta.season.r", "muS", "muR")) %>%
+  ggplot(aes(x = .value, fill = type)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(.variable)) +
+  geom_vline(xintercept = 0, linetype = "dashed")
 ```
 
