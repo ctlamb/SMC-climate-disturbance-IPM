@@ -842,7 +842,7 @@ nyr <- max(demog$j)
 ipm.LP.betas.draws <- out %>%
   gather_draws(
     muS, beta.dist.s, beta.snow.depth.s, beta.cooler.winter.s, beta.start.spring.s, beta.warm.dry.summer.s, beta.rain.on.snow.s,
-    muR, beta.dist.r, beta.snow.depth.r, beta.cooler.winter.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r, beta.type.osc.r, beta.type.otc.r, beta.type.mnka.r, offset,
+    muR, beta.dist.r, beta.snow.depth.r, beta.cooler.winter.r, beta.start.spring.r, beta.warm.dry.summer.r, beta.rain.on.snow.r, beta.type.osc.r,
     ndraws = ndraws
   ) %>%
   rename(median = .value) %>%
@@ -874,13 +874,13 @@ for (draw in 1:length(draws)) {
   ## sim 1==climate + disturbance
   ## sim 2==climate only
   ## sim 3==disturbance only
-  yrs.baseline <- 11:20
+  yrs.baseline <- 1:20
 
   dist.hum.array <- array(NA, dim = c(nherd, nyr, 3))
   dist.hum.array[, , 1] <- dist.hum %>%
     as.data.frame() %>%
     unlist()
-  dist.hum.array[, , 2] <- rowMeans(dist.hum.array[, 1:2, 1])
+  dist.hum.array[, , 2] <- rowMeans(dist.hum.array[, yrs.baseline, 1])
   dist.hum.array[, , 3] <- dist.hum.array[, , 1]
 
   # dist.hum.array[, 51, 1] == dist.hum.array[, 51, 3]
@@ -936,8 +936,8 @@ for (draw in 1:length(draws)) {
   # pred_totN[, 1, 1, ] <- out$mean$N[, 1, 1] + out$mean$N[, 1, 2]
   # #
   ## when no first year for all
-  pred_N[, 1, 1, ] <- 20
-  pred_N[, 1, 2, ] <- 175
+  pred_N[, 1, 1, ] <- 25
+  pred_N[, 1, 2, ] <- 150
 
   # format is	 [hd,yr,sim]
   pred_s.daily[, 1, 1, ] <- 0.85^(1 / 365) ## first herd-specific S available, transform to daily
@@ -967,7 +967,6 @@ for (draw in 1:length(draws)) {
         pred_S[h, yr, 1, sim] <- pred_s.daily[h, yr, 1, sim]^365
 
         pred_R[h, yr, 1, sim] <- as.numeric(ipm.LP.betas.i %>% filter(.variable == "muR") %>% pull(median) + # intercept (baseline recruitment)
-          # ipm.LP.betas.i %>% filter(.variable == "offset") %>% pull(median) * 9 +
           ipm.LP.betas.i %>% filter(.variable == "beta.dist.r") %>% pull(median) * dist.hum.array[h, yr, sim] + ## note dist.hum here and dist in IPM. Same data, just different notation
           ipm.LP.betas.i %>% filter(.variable == "beta.snow.depth.r") %>% pull(median) * snow.depth.array[h, yr, sim] +
           ipm.LP.betas.i %>% filter(.variable == "beta.cooler.winter.r") %>% pull(median) * cooler.winter.array[h, yr, sim] +
@@ -1031,7 +1030,8 @@ sim.results %>%
   summarise(value = median(value)) %>%
   ggplot(aes(x = yrs, y = value, color = sim, group = sim)) +
   geom_line() +
-  facet_wrap(vars(herd), scales = "free")
+  facet_wrap(vars(herd), scales = "free")+
+  scale_y_continuous(limits = c(0, NA))
 
 ## sim 1==climate + disturbance
 ## sim 2==climate only

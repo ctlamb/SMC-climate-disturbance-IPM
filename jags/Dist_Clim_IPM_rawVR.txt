@@ -97,10 +97,8 @@ beta.type.mnka.r ~ dnorm(0, 0.01)
 # First year population size
 	for(h in 1:nherd){	
 ##CL tried dnorm here to make sure the starting pop size isn't an issue, want error on it
-		#N[h,first[h],1] ~ dpois(n1[h,1])
-		#N[h,first[h],2] ~ dpois(n1[h,2])
-		N[h,first[h],1] ~ dnorm(n1[h,1],0.0001)T(0,)
-		N[h,first[h],2] ~ dnorm(n1[h,2],0.0001)T(0,)
+		N[h,first[h],1] ~ dnorm(n1[h,1],0.0005)T(0,)
+		N[h,first[h],2] ~ dnorm(n1[h,2],0.0005)T(0,)
 		
 		totCalves[h,first[h]] <- N[h,first[h],1] 
 		totAdults[h,first[h]] <- N[h,first[h],2] 
