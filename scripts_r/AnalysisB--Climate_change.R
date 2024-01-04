@@ -13,7 +13,7 @@ covariates <- read_csv(here::here("data/spatial/covariates_simplified.csv")) %>%
   dplyr::select(herd, year, ECCC, !!covar.names)
 
 covariates %>%
-  select(herd, year, ECCC,dist.hum, dist.nat, snow.depth, warm.dry.summer, start.spring, rain.on.snow) %>%
+  select(herd, year, ECCC,dist.hum, dist.nat,snow.depth, warm.dry.summer, start.spring, rain.on.snow, cooler.winter,greenness) %>%
   pivot_longer(c(-herd, -year, -ECCC)) %>%
   ggplot() +
   geom_path(
@@ -34,13 +34,13 @@ covariates %>%
   theme(legend.position = "bottom")+
   theme.custom
 
-ggsave(here::here("plots", "AnalysisB_AnnualCovars.png"), width = 6, height = 7, bg = "white")
+ggsave(here::here("plots", "AnalysisB_AnnualCovars.png"), width = 6, height = 9, bg = "white")
 
 
 
 
 coef.vals <-covariates %>%
-  select(herd, year, ECCC, snow.depth, warm.dry.summer, start.spring, rain.on.snow) %>%
+  select(herd, year, ECCC, snow.depth, warm.dry.summer, start.spring, rain.on.snow, cooler.winter) %>%
   mutate_if(is.numeric, scale) %>%
   pivot_longer(c(-herd, -year, -ECCC)) %>%
   nest(data = c(-name, -ECCC)) %>%

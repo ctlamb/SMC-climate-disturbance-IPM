@@ -119,7 +119,7 @@ treatment.combos <- trt %>%
 yrs_keep <- 1970:2020
 
 remove.trts <- treatment.combos %>%
-  filter(trt != "transplant") %>% ## this was coded as years following the transplant and it had no effect, so retain
+  filter(trt != "transplant") %>% ## this was coded as years following the transplant and it had no effect in Lamb et al. 2024 Eco Apps, so retain
   distinct(trt) %>%
   pull(trt)
 
@@ -183,6 +183,8 @@ surv.yr <- surv.yr%>%
   ) %>%
   filter(year %in% (yrs_keep))
 
+sum(surv.yr$time)/365
+sum(surv.yr$event)
 recruit.yr <- recruit.yr%>%
   left_join(treatment.combos, by=c("herd","year"))%>%
   filter(!trt%in%remove.trts)%>%

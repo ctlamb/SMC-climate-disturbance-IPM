@@ -19,6 +19,7 @@ knitr::purl(
 
 ## Load Data
 ```{r Load packages and data, results='hide', message=FALSE, warning=FALSE}
+library(renv)
 library(MCMCvis)
 library(tidybayes)
 library(ggmcmc)
@@ -73,6 +74,10 @@ labels <- read.csv(here::here("data/clean/labels.csv"))
 
 #  Years of study
 yr_df <- read.csv(here::here("data/clean/forIPM/yr_df.csv"))
+
+##ecotype
+ecotype <- read_csv(here::here("data/clean/ecotype.csv"))%>%
+  select(herd=Herd, ecotype=ECCC_Recov_Grp)
 ```
 
 
@@ -121,6 +126,7 @@ counts <- counts %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole
 afr <- afr %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
 afs <- afs %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
 covariates <- covariates %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
+ecotype <- ecotype %>% mutate(herd = case_when(herd %in% "Narraway BC" ~ "Bearhole Redwillow", TRUE ~ herd))
 
 # Pull out some values, summarize to demog data frame ---------------------
 
@@ -426,11 +432,12 @@ plot.draws <- out %>%
   ) %>%
   mutate(
     type = str_sub(.variable, -1, -1)%>%str_to_upper(),
-    var = str_sub(.variable, 6, -2)
+    var = str_sub(.variable, 6, -3)
   ) %>%
   select(var, .value, type)%>%
-  mutate(var=case_when(var=="dist."~"disturbance",
-                       TRUE~str_replace(var,"."," ")))
+  ungroup%>%
+  mutate(var=case_when(var=="dist"~"disturbance",
+                       TRUE~str_replace_all(var,"\\."," ")))
 
 
 plot.draws%>%
@@ -440,8 +447,11 @@ ggplot(aes(x = .value, color = type, fill=type, y = fct_reorder(var, median))) +
   geom_density_ridges(alpha=0.4,rel_min_height = 0.01) +
   geom_vline(xintercept = 0, linetype = "dashed")+
   theme.custom+
-  theme(legend.position = c(0.2,1),legend.direction="horizontal")+
+  theme(legend.position = c(0.2,0.97),legend.direction="horizontal")+
   labs(x = "Estimate (standardized)", y = "Covariate", color = "Vital rate", fill = "Vital rate")
+
+ggsave(here::here("plots", "AnalysisC_vitalrate_betas.png"), width = 6, height = 6, bg = "white")
+
 ```
 
 ```{r add lambda, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, results='hide'}
@@ -526,295 +536,6 @@ out %>%
   geom_point(position = position_dodge(width = 0.3)) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   labs(x = "Estimate (standardized)", y = "Covariate", color = "Demographic rate")
-```
-
-```{r explore lambda relationships, fig.height=11, fig.width=15, message=FALSE}
-cor(demog.mod$lambda, demog.mod$R)
-cor(demog.mod$lambda, demog.mod$S)
-cor(demog.mod$R, demog.mod$S)
-
-plot(demog.mod$S, demog.mod$lambda)
-plot(demog.mod$R, demog.mod$lambda)
-plot(demog.mod$R, demog.mod$S)
-
-plot(demog$S, demog$lambda)
-
-
-lmer(lambda ~ S + (1 | herd), data = demog.mod) %>% summary()
-lmer(lambda ~ R + (1 | herd), data = demog.mod) %>% summary()
-
-
-ggplot(demog.mod, aes(x = S, y = lambda, group = herd, color = herd)) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE) +
-  theme(legend.position = "none")
-
-ggplot(demog.mod, aes(x = R, y = lambda, group = herd, color = herd)) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE) +
-  theme(legend.position = "none")
-
-plot.dat <- demog.mod %>%
-  group_by(herd) %>%
-  arrange(year) %>%
-  ## calculate alternate population growth rates (over 3 and 5 year)
-  mutate(
-    herd = as.factor(herd),
-    trt = as.factor(trt),
-    weight.i = 1 / ((lambda.upper - lambda.lower) / lambda),
-    weights = weight.i / mean(weight.i),
-    lambda_3 = (totNMF / lag(totNMF, 3))^(1 / 3),
-    lambda_5 = (totNMF / lag(totNMF, 5))^(1 / 5)
-  ) %>%
-  ungroup()
-
-
-plot.dat %>%
-  filter(trt == "Reference") %>%
-  ggplot(aes(x = dist.hum.es, y = lambda)) +
-  geom_point() +
-  geom_hline(yintercept = 1, linetype = "dashed") +
-  geom_smooth()
-
-plot.dat %>%
-  filter(trt == "Reference") %>%
-  ggplot(aes(x = dist.hum.es, y = lambda_5)) +
-  geom_point() +
-  geom_hline(yintercept = 1, linetype = "dashed") +
-  geom_smooth()
-
-
-
-library(mgcv)
-m1 <- mgcv::gam(
-  lambda_3 ~
-    s(snow.depth) +
-    s(start.spring) +
-    s(warm.dry.summer) +
-    s(rain.on.snow) +
-    s(dist.hum.es, k = 5) +
-
-    s(herd, bs = "re") +
-
-    s(snow.depth, herd, bs = "re") +
-    s(warm.dry.summer, herd, bs = "re") +
-    s(dist.hum.es, herd, bs = "re") +
-    s(start.spring, herd, bs = "re") +
-    s(rain.on.snow, herd, bs = "re"),
-  data = plot.dat
-)
-
-
-summary(m1)$r.sq
-
-plot(m1, page = 1, scheme = 2)
-
-m1 <- mgcv::gam(
-  totNMF ~
-    s(snow.depth) +
-    s(start.spring) +
-    s(warm.dry.summer) +
-    s(rain.on.snow) +
-    s(dist.hum.es, k = 5) +
-
-    s(herd, bs = "re") +
-
-    s(snow.depth, herd, bs = "re") +
-    s(warm.dry.summer, herd, bs = "re") +
-    s(dist.hum.es, herd, bs = "re") +
-    s(start.spring, herd, bs = "re") +
-    s(rain.on.snow, herd, bs = "re"),
-  # data = plot.dat
-  data = plot.dat %>% filter(!herd %in% c("Takla", "Itcha-Ilgachuz"))
-)
-
-
-summary(m1)$r.sq
-
-plot(m1, page = 1, scheme = 2)
-
-
-
-
-### plot dist vs lambda summarized
-
-## add lambda (temporary)
-yr.bin <- 10
-mod.dat <- demog.mod %>%
-  filter(trt == "Reference") %>%
-  group_by(herd, year = ceiling(year / yr.bin) * yr.bin) %>%
-  summarize(
-    year = paste(first(year) - yr.bin, first(year), sep = "-"),
-    r = mean(log(lambda), na.rm = TRUE),
-    S = mean(S, na.rm = TRUE),
-    R = mean(R, na.rm = TRUE),
-    dist = mean(dist.hum.es, na.rm = TRUE),
-    dist.all = mean(dist.all, na.rm = TRUE),
-    snow.depth = mean(snow.depth, na.rm = TRUE),
-    start.spring = mean(start.spring, na.rm = TRUE),
-    warm.dry.summer = mean(warm.dry.summer, na.rm = TRUE),
-    rain.on.snow = mean(rain.on.snow, na.rm = TRUE)
-  ) %>%
-  ungroup() %>%
-  filter(
-    # !herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau"),
-    r < 0.2,
-    r > (-0.2)
-  )
-
-ggplot(mod.dat, aes(x = dist, y = r)) +
-  geom_point() +
-  geom_smooth(method = "loess") +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(
-    x = "Disturbance (proportion of herd area)",
-    y = "Instantaneous growth rate"
-  )
-
-cor(mod.dat$r, mod.dat$R)
-cor(mod.dat$r, mod.dat$S)
-
-plot(mod.dat$R, mod.dat$r)
-plot(mod.dat$S, mod.dat$r)
-
-library(lme4)
-lmer(r ~ S + (1 + S | herd), data = mod.dat) %>% summary()
-lmer(r ~ R + (1 + R | herd), data = mod.dat) %>% summary()
-
-
-
-yr.bin <- 20
-mod.dat.ch <- demog.mod %>%
-  filter(trt == "Reference") %>%
-  select(herd, year, lambda, totNMF) %>%
-  left_join(read_csv(here::here("data/spatial/ch.dist.csv")) %>% mutate(herd = str_trim(herd)), by = c("herd", "year")) %>%
-  group_by(herd, CH_type, year = ceiling(year / yr.bin) * yr.bin) %>%
-  summarize(
-    year = paste(first(year) - yr.bin, first(year), sep = "-"),
-    r = exp(mean(log(lambda), na.rm = TRUE)),
-    N = min(totNMF, na.rm = TRUE),
-    dist = mean(dist.hum.es, na.rm = TRUE)
-  ) %>%
-  filter(
-    # !herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau"),
-    r < 1.2,
-    r > 0.8
-  )
-
-
-
-
-
-
-ggplot(
-  mod.dat.ch %>% pivot_wider(names_from = "CH_type", values_from = dist),
-  aes(x = HEWSR, y = `LEWSR/Matrix`)
-) +
-  geom_point()
-
-
-mod.dat.ch.50 <- mod.dat.ch %>%
-  pivot_wider(names_from = "CH_type", values_from = dist) %>%
-  filter(N > 50, !herd %in% c("Maligne", "Tonquin", "Narraway AB")) ## no CH delineated
-
-ggplot(
-  mod.dat.ch.50,
-  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r >= 1, color = r >= 1)
-) +
-  geom_point(alpha = 0.4)
-
-ggplot(
-  mod.dat.ch.50,
-  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r, color = r)
-) +
-  geom_point(alpha = 0.5)
-
-ggplot(
-  mod.dat.ch.50,
-  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r >= 1, color = r >= 1)
-) +
-  geom_rect(aes(xmin = 0 - 0.005, xmax = 0.025, ymin = 0 - 0.01, ymax = 0.25),
-    fill = "transparent", color = "grey", size = 1, linetype = "dashed"
-  ) +
-  geom_point(alpha = 0.5) +
-  labs(
-    x = "High elevation disturbance (proportion)",
-    y = "Matrix disturbance (proportion)",
-    size = "Stable?",
-    color = "Stable?"
-  )
-
-
-
-ggplot(
-  mod.dat.ch.50,
-  aes(x = HEWSR, y = `LEWSR/Matrix`, size = N, color = N)
-) +
-  geom_point(alpha = 0.4)
-
-
-mod.dat.ch.50 %>%
-  ungroup() %>%
-  mutate(
-    HEWSR.cat = cut_width(HEWSR, 0.05),
-    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
-  ) %>%
-  group_by(HEWSR.cat, Matrix.cat) %>%
-  summarise(
-    lambda = exp(log(r) %>% mean()),
-    n = n(),
-    ss = sum(r >= 1) / n
-  ) %>%
-  ggplot() +
-  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = ss)) +
-  geom_text(aes(x = HEWSR.cat, y = Matrix.cat, label = n), color = "white") +
-  theme_ipsum() +
-  labs(
-    x = "High elevation disturbance (proportion)",
-    y = "Matrix disturbance (proportion)"
-  )
-
-mod.dat.ch.50 %>%
-  ungroup() %>%
-  mutate(
-    HEWSR.cat = cut_width(HEWSR, 0.1),
-    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
-  ) %>%
-  group_by(HEWSR.cat, Matrix.cat) %>%
-  summarise(
-    lambda = exp(log(r) %>% mean()),
-    n = n(),
-    ss.count = sum(r >= 0.99),
-    ss = ss.count / n
-  ) %>%
-  ggplot() +
-  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = ss)) +
-  geom_text(aes(x = HEWSR.cat, y = Matrix.cat, label = paste0(ss.count, "/", n)), color = "white") +
-  theme_ipsum() +
-  labs(
-    x = "High elevation disturbance (proportion)",
-    y = "Matrix disturbance (proportion)"
-  )
-
-mod.dat.ch.50 %>%
-  ungroup() %>%
-  mutate(
-    HEWSR.cat = cut_width(HEWSR, 0.05),
-    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
-  ) %>%
-  group_by(HEWSR.cat, Matrix.cat) %>%
-  summarise(
-    lambda = exp(log(r) %>% mean()),
-    n = n(),
-    ss = sum(r >= 1) / n
-  ) %>%
-  ggplot() +
-  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = lambda)) +
-  theme_ipsum() +
-  labs(
-    x = "High elevation disturbance (proportion)",
-    y = "Matrix disturbance (proportion)"
-  )
 ```
 
 ## Run simulations to assess C+D, D, C WITH ERROR
@@ -1058,6 +779,32 @@ sim.results %>%
   mutate(yr_idx = parse_number(name)) %>%
   left_join(yr_df, by = "yr_idx") %>%
   left_join(hd, by = "herd_num") %>%
+  left_join(ecotype%>%distinct(), by="herd")%>%
+  group_by(ecotype, draw, sim, yrs) %>%
+  summarise(value = sum(value)) %>%
+  ungroup() %>%
+  group_by(ecotype,sim, yrs) %>%
+  summarise(
+    median = median(value),
+    lower = quantile(value, 0.05),
+    upper = quantile(value, 0.95)
+  ) %>%
+  ungroup%>%
+  mutate(ecotype=fct_relevel(ecotype,"Southern Group","Central Group", "Northern Group"))%>%
+  ggplot(aes(x = yrs, y = median, ymin = lower, ymax = upper, color = sim, fill = sim)) +
+  geom_ribbon(alpha = 0.2, color = NA) +
+  geom_line() +
+  scale_y_continuous(limits = c(0, NA)) +
+  theme.custom+
+  labs(x = "Year", y = "SMC abundance", color="",fill="")+
+  facet_wrap(vars(ecotype), scales="free")
+ggsave(here::here("plots", "AnalysisC_climate.sim.byECCC.png"), width = 10, height = 6, bg = "white")
+
+sim.results %>%
+  pivot_longer(-c("herd_num", "sim", "draw")) %>%
+  mutate(yr_idx = parse_number(name)) %>%
+  left_join(yr_df, by = "yr_idx") %>%
+  left_join(hd, by = "herd_num") %>%
   select(draw, sim, herd, yrs, value) %>%
   group_by(draw, sim, yrs) %>%
   summarise(value = sum(value)) %>%
@@ -1072,8 +819,32 @@ sim.results %>%
   geom_ribbon(alpha = 0.2, color = NA) +
   geom_line() +
   scale_y_continuous(limits = c(0, NA)) +
-  theme_ipsum() +
-  labs(x = "Year", y = "SMC abundance")
+  theme.custom+
+  labs(x = "Year", y = "SMC abundance", color="",fill="")
+
+ggsave(here::here("plots", "AnalysisC_climate.sim.png"), width = 5, height = 6, bg = "white")
+
+
+sim.results %>%
+  pivot_longer(-c("herd_num", "sim", "draw")) %>%
+  mutate(yr_idx = parse_number(name)) %>%
+  left_join(yr_df, by = "yr_idx") %>%
+  left_join(hd, by = "herd_num") %>%
+  select(draw, sim, herd, yrs, value) %>%
+  group_by(draw, sim, yrs) %>%
+  summarise(value = sum(value)) %>%
+  group_by(draw, sim) %>%
+  arrange(yrs)%>%
+  mutate(lambda=value/lag(value))%>%
+  slice(-1)%>%
+  summarise(lambda=exp(mean(log(lambda))))%>%
+  group_by(sim)%>%
+ summarise(
+    median = median(lambda),
+    lower = quantile(lambda, 0.05),
+    upper = quantile(lambda, 0.95)
+  )
+
 
 # pred_totNMF[13, , , 1]
 # pred_totNMF[13, , , 2]
@@ -1087,3 +858,347 @@ sim.results %>%
 # pred_R[13, , , 2] %>% mean()
 # pred_R[13, , , 3] %>% mean()
 ```
+
+```{r explore lambda relationships, fig.height=11, fig.width=15, message=FALSE}
+cor(demog.mod$lambda, demog.mod$R)
+cor(demog.mod$lambda, demog.mod$S)
+cor(demog.mod$R, demog.mod$S)
+
+plot(demog.mod$S, demog.mod$lambda)
+plot(demog.mod$R, demog.mod$lambda)
+plot(demog.mod$R, demog.mod$S)
+
+plot(demog$S, demog$lambda)
+
+
+lmer(lambda ~ S + (1 | herd), data = demog.mod) %>% summary()
+lmer(lambda ~ R + (1 | herd), data = demog.mod) %>% summary()
+
+
+ggplot(demog.mod, aes(x = S, y = lambda, group = herd, color = herd)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme(legend.position = "none")
+
+ggplot(demog.mod, aes(x = R, y = lambda, group = herd, color = herd)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme(legend.position = "none")
+
+plot.dat <- demog.mod %>%
+  group_by(herd) %>%
+  arrange(year) %>%
+  ## calculate alternate population growth rates (over 3 and 5 year)
+  mutate(
+    herd = as.factor(herd),
+    trt = as.factor(trt),
+    weight.i = 1 / ((lambda.upper - lambda.lower) / lambda),
+    weights = weight.i / mean(weight.i),
+    lambda_3 = (totNMF / lag(totNMF, 3))^(1 / 3),
+    lambda_5 = (totNMF / lag(totNMF, 5))^(1 / 5)
+  ) %>%
+  ungroup()
+
+
+plot.dat %>%
+  filter(trt == "Reference") %>%
+  ggplot(aes(x = dist.hum.es, y = lambda)) +
+  geom_point() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_smooth()
+
+plot.dat %>%
+  filter(trt == "Reference") %>%
+  ggplot(aes(x = dist.hum.es, y = lambda_5)) +
+  geom_point() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_smooth()
+
+
+
+library(mgcv)
+m1 <- mgcv::gam(
+  lambda_3 ~
+    s(snow.depth) +
+    s(start.spring) +
+    s(warm.dry.summer) +
+    s(rain.on.snow) +
+    s(dist.hum.es, k = 5) +
+
+    s(herd, bs = "re") +
+
+    s(snow.depth, herd, bs = "re") +
+    s(warm.dry.summer, herd, bs = "re") +
+    s(dist.hum.es, herd, bs = "re") +
+    s(start.spring, herd, bs = "re") +
+    s(rain.on.snow, herd, bs = "re"),
+  data = plot.dat
+)
+
+
+summary(m1)$r.sq
+
+plot(m1, page = 1, scheme = 2)
+
+m1.n <- mgcv::gam(
+  totNMF ~
+    s(snow.depth) +
+    s(start.spring) +
+    s(warm.dry.summer) +
+    s(rain.on.snow) +
+    s(dist.hum.es, k = 5) +
+
+    s(herd, bs = "re") +
+
+    s(snow.depth, herd, bs = "re") +
+    s(warm.dry.summer, herd, bs = "re") +
+    s(dist.hum.es, herd, bs = "re") +
+    s(start.spring, herd, bs = "re") +
+    s(rain.on.snow, herd, bs = "re"),
+  # data = plot.dat
+  data = plot.dat %>% filter(!herd %in% c("Takla", "Itcha-Ilgachuz"))
+)
+
+
+summary(m1.n)$r.sq
+
+plot(m1.n, page = 1, scheme = 2)
+
+
+
+
+### plot dist vs lambda summarized
+
+yr.bin <- 10
+mod.dat <- demog.mod %>%
+  filter(trt == "Reference") %>%
+  group_by(herd, year = ceiling(year / yr.bin) * yr.bin) %>%
+  summarize(
+    year = paste(first(year) - yr.bin, first(year), sep = "-"),
+    r = mean(log(lambda), na.rm = TRUE),
+    S = mean(S, na.rm = TRUE),
+    R = mean(R, na.rm = TRUE),
+    N = median(totNMF, na.rm = TRUE),
+    dist = mean(dist.hum.es, na.rm = TRUE),
+    dist.all = mean(dist.all, na.rm = TRUE),
+    snow.depth = mean(snow.depth, na.rm = TRUE),
+    start.spring = mean(start.spring, na.rm = TRUE),
+    warm.dry.summer = mean(warm.dry.summer, na.rm = TRUE),
+    rain.on.snow = mean(rain.on.snow, na.rm = TRUE),
+    n=n(),
+  ) %>%
+  ungroup() %>%
+  filter(n>=5,
+    #!herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau"),
+    r < 0.2,
+    r > (-0.2)
+  )
+
+lambda.dist <- ggplot(data=mod.dat,aes(x = dist, y = r)) +
+  geom_point(alpha=0.5, aes(size=N)) +
+  geom_smooth(method = "loess",aes(color="All"),se=FALSE, alpha=0.5) +
+  geom_smooth(data=mod.dat%>%filter(!herd%in%c("Maligne", "Banff", "Tonquin", "Brazeau")),method = "loess",aes(color="w/o AB Parks"),se=FALSE, alpha=0.5, linetype="dashed") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Disturbance (proportion of herd area)",
+    y = "Instantaneous growth rate",
+    color="Data"
+  )+
+  scale_color_manual(values=c("All" = "red", "w/o AB Parks" = "forestgreen"))+
+  scale_size_continuous(breaks = c(100, 500, 1000))+
+  theme.custom
+
+cor(mod.dat$r, mod.dat$R)
+cor(mod.dat$r, mod.dat$S)
+
+plot(mod.dat$R, mod.dat$r)
+plot(mod.dat$S, mod.dat$r)
+
+library(lme4)
+lmer(r ~ S + (1 + S | herd), data = mod.dat) %>% summary()
+lmer(r ~ R + (1 + R | herd), data = mod.dat) %>% summary()
+
+
+
+yr.bin <- 10
+mod.dat.ch <- demog.mod %>%
+  filter(trt == "Reference") %>%
+  select(herd, year, lambda, totNMF) %>%
+  left_join(read_csv(here::here("data/spatial/ch.dist.csv")) %>% mutate(herd = str_trim(herd)), by = c("herd", "year")) %>%
+  group_by(herd, CH_type, year = ceiling(year / yr.bin) * yr.bin) %>%
+  summarize(
+    year = paste(first(year) - yr.bin, first(year), sep = "-"),
+    r = exp(mean(log(lambda), na.rm = TRUE)),
+    N = min(totNMF, na.rm = TRUE),
+    dist = mean(dist.hum, na.rm = TRUE),
+    n=n()
+  )%>%
+  filter(n>=5)
+
+
+
+
+
+
+ggplot(
+  mod.dat.ch %>% pivot_wider(names_from = "CH_type", values_from = dist),
+  aes(x = HEWSR, y = `LEWSR/Matrix`)
+) +
+  geom_point()
+
+
+mod.dat.ch.50 <- mod.dat.ch %>%
+  pivot_wider(names_from = "CH_type", values_from = dist) %>%
+  filter(N > 50, !herd %in% c("Maligne", "Tonquin", "Narraway AB")) ## no CH delineated
+
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r >= 1, color = r >= 1)
+) +
+  geom_point(alpha = 0.4)
+
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r, color = r)
+) +
+  geom_point(alpha = 0.5)
+
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = r >= 0.99, color = r >= 0.99)
+) +
+  geom_rect(aes(xmin = 0 - 0.005, xmax = 0.05, ymin = 0 - 0.01, ymax = 0.25),
+    fill = "transparent", color = "grey", size = 1, linetype = "dashed"
+  ) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)",
+    size = "Stable?",
+    color = "Stable?"
+  )
+
+
+
+ggplot(
+  mod.dat.ch.50,
+  aes(x = HEWSR, y = `LEWSR/Matrix`, size = N, color = N)
+) +
+  geom_point(alpha = 0.4)
+
+
+mod.dat.ch.50 %>%
+  ungroup() %>%
+  mutate(
+    HEWSR.cat = cut_width(HEWSR, 0.05),
+    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
+  ) %>%
+  group_by(HEWSR.cat, Matrix.cat) %>%
+  summarise(
+    lambda = exp(log(r) %>% mean()),
+    n = n(),
+    ss = sum(r >= 1) / n
+  ) %>%
+  ggplot() +
+  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = ss)) +
+  geom_text(aes(x = HEWSR.cat, y = Matrix.cat, label = n), color = "white") +
+  theme_ipsum() +
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)"
+  )
+
+ss.grid <- mod.dat.ch.50 %>%
+  ungroup() %>%
+  mutate(
+    HEWSR.cat = cut_width(HEWSR, 0.1, boundary = 0)%>%str_remove_all("\\(|\\[|\\]")%>%str_replace(",","-"),
+    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.15, boundary = 0)%>%str_remove_all("\\(|\\[|\\]")%>%str_replace(",","-"),
+  ) %>%
+  group_by(HEWSR.cat, Matrix.cat) %>%
+  summarise(
+    lambda = exp(log(r) %>% mean()),
+    n = n(),
+    ss.count = sum(r >= 0.99),
+    ss = ss.count / n
+  ) %>%
+  ggplot() +
+  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = ss)) +
+  geom_text(aes(x = HEWSR.cat, y = Matrix.cat, label = paste0(ss.count, "/", n)), color = "white") +
+  theme.custom+
+  theme(legend.position = "bottom")+
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)",
+    fill="Self-sustaining \n(proportion)"
+  )
+
+plot1 <-mod.dat.ch.50 %>%
+  ungroup() %>%
+  filter(r >= 0.99)%>%
+  ggplot(aes(x = HEWSR)) + 
+  geom_histogram(color = "black", fill = "white",binwidth=0.05) + 
+  theme_void()+
+  theme(axis.text.x=element_text(size=10))
+
+plot1 <-mod.dat.ch.50 %>%
+  ungroup() %>%
+  ggplot(aes(x = HEWSR, fill=r>=0.99)) + 
+  geom_density(binwidth=0.05, color="black", alpha=0.4) + 
+  scale_fill_manual(values=c("black","dodgerblue"))+
+  theme_void()+
+  theme(axis.text.x=element_text(size=10),
+        legend.position = "none")
+
+plot2 <-mod.dat.ch.50 %>%
+  ungroup() %>%
+  filter(r >= 0.99)%>%
+  ggplot(aes(x = `LEWSR/Matrix`)) + 
+  geom_histogram(color = "black", fill = "white",binwidth=0.05)+
+  coord_flip()+
+  theme_void()+
+  theme(axis.text.y=element_text(size=10))
+
+plot2 <-mod.dat.ch.50 %>%
+  ungroup() %>%
+  ggplot(aes(x = `LEWSR/Matrix`, fill=r>=0.99)) + 
+  geom_density(binwidth=0.05, color="black", alpha=0.4) + 
+  scale_fill_manual(values=c("black","dodgerblue"))+
+  theme_void()+
+    coord_flip()+
+  theme(axis.text.y=element_text(size=10),
+        legend.position = "none")
+
+ss.grid  <- plot1 + plot_spacer() + ss.grid + plot2 + 
+  plot_layout(
+    ncol = 2, 
+    nrow = 2, 
+    widths = c(4, 1),
+    heights = c(1, 4)
+  ) 
+
+lambda.dist + ss.grid
+ggsave(here::here("plots", "self.sustaining.prop.png"), width = 10, height = 6, bg = "white")
+
+
+
+mod.dat.ch.50 %>%
+  ungroup() %>%
+  mutate(
+    HEWSR.cat = cut_width(HEWSR, 0.05),
+    Matrix.cat = cut_width(`LEWSR/Matrix`, 0.1)
+  ) %>%
+  group_by(HEWSR.cat, Matrix.cat) %>%
+  summarise(
+    lambda = exp(log(r) %>% mean()),
+    n = n(),
+    ss = sum(r >= 1) / n
+  ) %>%
+  ggplot() +
+  geom_tile(aes(x = HEWSR.cat, y = Matrix.cat, fill = lambda)) +
+  theme_ipsum() +
+  labs(
+    x = "High elevation disturbance (proportion)",
+    y = "Matrix disturbance (proportion)"
+  )
+```
+

@@ -116,8 +116,13 @@ ggplot(
 
 ## mixed effect modelling
 lmer(mean ~ year + (1 + year | herd), REML = F, data = summer.ndvi.herd %>%
-  group_by(herd, year, ECCC) %>%
+  group_by(herd, year) %>%
   summarise(mean = mean(ndvi))) %>%
+  tidy()
+
+lmer(mean ~ year + (1 + year | herd), REML = F, data = summer.ndvi.herd %>%
+       group_by(herd, year, ECCC) %>%
+       summarise(mean = mean(ndvi))) %>%
   ranef() %>%
   data.frame()
 
@@ -261,12 +266,16 @@ ggplot(
   labs(title = "EVI 2000-2021", x = "Year", y = "NDVI Change")
 
 ## mixed models
+lmer(evi ~ year + (1 + year | herd), REML = F, data = summer.evi.herd %>%mutate_at(vars(evi, evi.nodist, evi.dist), scale) %>%
+       mutate(year = year - 1999)) %>%
+  tidy()
+
 summer.evi.herd %>%
   mutate_at(vars(evi, evi.nodist, evi.dist), scale) %>%
   mutate(year = year - 1999) %>%
   nest(data = c(-ECCC)) %>%
   mutate(
-    fit = map(data, ~ lmer((evi) ~ year + (1 + year | herd) + (1 | herd), data = .x)),
+    fit = map(data, ~ lmer((evi) ~ year + (1 + year | herd), data = .x)),
     tidied = map(fit, tidy)
   ) %>%
   unnest(tidied) %>%
